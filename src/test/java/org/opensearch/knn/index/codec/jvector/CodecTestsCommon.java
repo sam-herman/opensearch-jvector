@@ -17,13 +17,13 @@ public class CodecTestsCommon {
     public static final String TEST_FIELD = "test_field";
     public static final String TEST_ID_FIELD = "id";
 
-    public static float calculateRecall(IndexReader reader, Set<Integer> groundTruthVectorsIds, TopDocs topDocs, int k)
+    public static float calculateRecall(IndexReader reader, Set<Integer> groundTruthVectorsIds, String field, TopDocs topDocs, int k)
             throws IOException {
         final ScoreDoc[] scoreDocs = topDocs.scoreDocs;
         Assert.assertEquals(groundTruthVectorsIds.size(), scoreDocs.length);
         int totalRelevantDocs = 0;
         for (ScoreDoc scoreDoc : scoreDocs) {
-            final int id = reader.storedFields().document(scoreDoc.doc).getField(TEST_ID_FIELD).storedValue().getIntValue();
+            final int id = reader.storedFields().document(scoreDoc.doc).getField(field).storedValue().getIntValue();
             if (groundTruthVectorsIds.contains(id)) {
                 totalRelevantDocs++;
             }

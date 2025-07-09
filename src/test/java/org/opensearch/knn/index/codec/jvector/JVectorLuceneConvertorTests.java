@@ -148,7 +148,7 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
             writeJVectorIndex(writeState, fieldInfo, preBuiltGraph, randomAccessVectorValues);
 
             // Write empty stored fields files (required even if no stored fields exist)
-            writeStoredFields(writeState, numDocs);
+            writeStoredFields(writeState, numDocs, fieldInfo);
 
             // Write segment info
             writeSegmentInfo(directory, segmentInfo);
@@ -189,13 +189,14 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
     /**
      * Writes empty stored fields files
      */
-    private void writeStoredFields(SegmentWriteState writeState, int numDocs) throws IOException {
+    private void writeStoredFields(SegmentWriteState writeState, int numDocs, FieldInfo fieldInfo) throws IOException {
         try (StoredFieldsWriter storedFieldsWriter = writeState.segmentInfo.getCodec().storedFieldsFormat()
                 .fieldsWriter(writeState.directory, writeState.segmentInfo, writeState.context)) {
 
             // Write empty documents (no stored fields)
             for (int i = 0; i < numDocs; i++) {
                 storedFieldsWriter.startDocument();
+                storedFieldsWriter.writeField(fieldInfo, i);
                 storedFieldsWriter.finishDocument();
             }
 
@@ -391,7 +392,7 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
             KnnFloatVectorQuery knnFloatVectorQuery = CodecTestsCommon.getJVectorKnnFloatVectorQuery(CodecTestsCommon.TEST_FIELD, target, k, filterQuery);
             TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
             assertEquals(k, topDocs.totalHits.value());
-            final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
+            final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, CodecTestsCommon.TEST_FIELD, topDocs, k);
             Assert.assertEquals(1.0f, recall, 0.05f);
             log.info("successfully completed search tests");
         }

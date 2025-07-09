@@ -832,7 +832,7 @@ public class KNNJVectorTests extends LuceneTestCase {
                 KnnFloatVectorQuery knnFloatVectorQuery = getJVectorKnnFloatVectorQuery(TEST_FIELD, target, k, filterQuery);
                 TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
                 assertEquals(k, topDocs.totalHits.value());
-                final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
+                final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, TEST_ID_FIELD, topDocs, k);
                 Assert.assertEquals(1.0f, recall, 0.05f);
                 log.info("successfully completed search tests");
             }
@@ -954,7 +954,7 @@ public class KNNJVectorTests extends LuceneTestCase {
                 KnnFloatVectorQuery knnFloatVectorQuery = getJVectorKnnFloatVectorQuery("test_field", target, k, filterQuery);
                 TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
                 assertEquals(k, topDocs.totalHits.value());
-                final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
+                final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, TEST_ID_FIELD, topDocs, k);
                 Assert.assertEquals(1.0f, recall, 0.05f);
                 log.info("successfully completed search tests");
             }
@@ -1082,7 +1082,7 @@ public class KNNJVectorTests extends LuceneTestCase {
                 KnnFloatVectorQuery knnFloatVectorQuery = getJVectorKnnFloatVectorQuery("test_field", target, k, filterQuery, 1000);
                 TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
                 assertEquals(k, topDocs.totalHits.value());
-                final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
+                final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, TEST_ID_FIELD, topDocs, k);
                 Assert.assertEquals("Expected to have recall of 1.0+/-0.05 but got " + recall, 1.0f, recall, 0.05f);
                 log.info("successfully completed search tests");
             }
