@@ -27,6 +27,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.opensearch.knn.index.codec.jvector.CodecTestsCommon.*;
 import static org.opensearch.knn.index.codec.jvector.JVectorFormat.DEFAULT_MERGE_ON_DISK;
 import static org.opensearch.knn.index.codec.jvector.JVectorFormat.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION;
 
@@ -40,9 +41,6 @@ import static org.opensearch.knn.index.codec.jvector.JVectorFormat.DEFAULT_MINIM
 @LuceneTestCase.SuppressSysoutChecks(bugUrl = "")
 @Log4j2
 public class KNNJVectorTests extends LuceneTestCase {
-    private static final String TEST_FIELD = "test_field";
-    private static final String TEST_ID_FIELD = "id";
-
     /**
      * Test to verify that the JVector codec is able to successfully search for the nearest neighbours
      * in the index.
@@ -834,7 +832,7 @@ public class KNNJVectorTests extends LuceneTestCase {
                 KnnFloatVectorQuery knnFloatVectorQuery = getJVectorKnnFloatVectorQuery(TEST_FIELD, target, k, filterQuery);
                 TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
                 assertEquals(k, topDocs.totalHits.value());
-                final float recall = calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
+                final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
                 Assert.assertEquals(1.0f, recall, 0.05f);
                 log.info("successfully completed search tests");
             }
@@ -956,7 +954,7 @@ public class KNNJVectorTests extends LuceneTestCase {
                 KnnFloatVectorQuery knnFloatVectorQuery = getJVectorKnnFloatVectorQuery("test_field", target, k, filterQuery);
                 TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
                 assertEquals(k, topDocs.totalHits.value());
-                final float recall = calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
+                final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
                 Assert.assertEquals(1.0f, recall, 0.05f);
                 log.info("successfully completed search tests");
             }
@@ -1084,7 +1082,7 @@ public class KNNJVectorTests extends LuceneTestCase {
                 KnnFloatVectorQuery knnFloatVectorQuery = getJVectorKnnFloatVectorQuery("test_field", target, k, filterQuery, 1000);
                 TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
                 assertEquals(k, topDocs.totalHits.value());
-                final float recall = calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
+                final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
                 Assert.assertEquals("Expected to have recall of 1.0+/-0.05 but got " + recall, 1.0f, recall, 0.05f);
                 log.info("successfully completed search tests");
             }
@@ -1129,29 +1127,6 @@ public class KNNJVectorTests extends LuceneTestCase {
         return sb.toString();
     }
 
-    private JVectorKnnFloatVectorQuery getJVectorKnnFloatVectorQuery(String fieldName, float[] target, int k, Query filterQuery) {
-        return getJVectorKnnFloatVectorQuery(fieldName, target, k, filterQuery, KNNConstants.DEFAULT_OVER_QUERY_FACTOR);
-    }
-
-    private JVectorKnnFloatVectorQuery getJVectorKnnFloatVectorQuery(
-        String fieldName,
-        float[] target,
-        int k,
-        Query filterQuery,
-        int overQueryFactor
-    ) {
-        return new JVectorKnnFloatVectorQuery(
-            fieldName,
-            target,
-            k,
-            filterQuery,
-            overQueryFactor,
-            KNNConstants.DEFAULT_QUERY_SIMILARITY_THRESHOLD.floatValue(),
-            KNNConstants.DEFAULT_QUERY_RERANK_FLOOR.floatValue(),
-            KNNConstants.DEFAULT_QUERY_USE_PRUNING
-        );
-    }
-
     private static float[][] getMonotonicallyIncreasingVectors(int numVectors, int vectorDimension) {
         float[][] vectors = new float[numVectors][vectorDimension];
         for (int i = 0; i < numVectors; i++) {
@@ -1169,54 +1144,4 @@ public class KNNJVectorTests extends LuceneTestCase {
         vector[vectorDimension - 1] = lastValue;
         return vector;
     }
-
-    private static float calculateRecall(IndexReader reader, Set<Integer> groundTruthVectorsIds, TopDocs topDocs, int k)
-        throws IOException {
-        final ScoreDoc[] scoreDocs = topDocs.scoreDocs;
-        Assert.assertEquals(groundTruthVectorsIds.size(), scoreDocs.length);
-        int totalRelevantDocs = 0;
-        for (ScoreDoc scoreDoc : scoreDocs) {
-            final int id = reader.storedFields().document(scoreDoc.doc).getField(TEST_ID_FIELD).storedValue().getIntValue();
-            if (groundTruthVectorsIds.contains(id)) {
-                totalRelevantDocs++;
-            }
-        }
-        return ((float) totalRelevantDocs) / ((float) k);
-    }
-
-    /**
-     * Find the IDs of the ground truth vectors in the dataset
-     * @param query query vector
-     * @param dataset dataset of all the vectors with their ordinal position in the array as their ID
-     * @param k the number of expected results
-     * @return the IDs of the ground truth vectors in the dataset
-     */
-    private static Set<Integer> calculateGroundTruthVectorsIds(
-        float[] query,
-        final float[][] dataset,
-        int k,
-        VectorSimilarityFunction vectorSimilarityFunction
-    ) {
-        final Set<Integer> groundTruthVectorsIds = new HashSet<>();
-        final PriorityQueue<ScoreDoc> priorityQueue = new PriorityQueue<>(k, (o1, o2) -> Float.compare(o1.score, o2.score));
-        for (int i = 0; i < dataset.length; i++) {
-            ScoreDoc scoreDoc = new ScoreDoc(i, vectorSimilarityFunction.compare(query, dataset[i]));
-            if (priorityQueue.size() >= k) {
-                final ScoreDoc top = priorityQueue.poll();
-                if (top.score < scoreDoc.score) {
-                    priorityQueue.add(scoreDoc);
-                } else {
-                    priorityQueue.add(top);
-                }
-            } else {
-                priorityQueue.add(scoreDoc);
-            }
-        }
-        while (!priorityQueue.isEmpty()) {
-            groundTruthVectorsIds.add(priorityQueue.poll().doc);
-        }
-
-        return groundTruthVectorsIds;
-    }
-
 }

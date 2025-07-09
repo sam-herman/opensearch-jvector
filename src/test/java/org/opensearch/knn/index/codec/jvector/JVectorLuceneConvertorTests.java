@@ -24,15 +24,19 @@ import org.apache.lucene.codecs.hnsw.FlatVectorsFormat;
 import org.apache.lucene.codecs.hnsw.FlatVectorsWriter;
 import org.apache.lucene.codecs.lucene99.Lucene99FlatVectorsFormat;
 import org.apache.lucene.index.*;
+import org.apache.lucene.search.*;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.tests.util.LuceneTestCase;
+import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.StringHelper;
 import org.apache.lucene.util.Version;
+import org.junit.Assert;
 import org.junit.Test;
+import org.opensearch.knn.TestUtils;
 import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.ThreadLeakFiltersForTests;
 
@@ -42,12 +46,13 @@ import java.time.Clock;
 import java.util.*;
 import java.util.stream.IntStream;
 
+import static org.opensearch.knn.index.codec.jvector.CodecTestsCommon.TEST_FIELD;
+import static org.opensearch.knn.index.codec.jvector.CodecTestsCommon.calculateGroundTruthVectorsIds;
 import static org.opensearch.knn.index.codec.jvector.JVectorFormat.SIMD_POOL;
 
 @ThreadLeakFilters(defaultFilters = true, filters = { ThreadLeakFiltersForTests.class })
 @Log4j2
 public class JVectorLuceneConvertorTests extends LuceneTestCase {
-    private static final String FIELD_NAME = "vector_field";
     private static final String SEGMENT_NAME = "_bulk";
     private static final VectorTypeSupport VECTOR_TYPE_SUPPORT = VectorizationProvider.getInstance().getVectorTypeSupport();
 
@@ -59,6 +64,7 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
     public void createLuceneSegment() throws IOException {
         final int numDocs = 3;
         final int dimension = 16;
+        final org.apache.lucene.index.VectorSimilarityFunction vectorSimilarityFunction = org.apache.lucene.index.VectorSimilarityFunction.EUCLIDEAN;
 
         final float[][] vectors = new float[numDocs][dimension];
         for (int i = 0; i < numDocs; i++) {
@@ -80,7 +86,7 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
 
             // Create FieldInfo and FieldInfos
             FieldInfo fieldInfo = new FieldInfo(
-                    FIELD_NAME,
+                    CodecTestsCommon.TEST_FIELD,
                     0, // field number
                     false, // storeTermVector
                     false, // omitNorms
@@ -95,7 +101,7 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
                     0, // pointNumBytes
                     dimension, // vectorDimension
                     VectorEncoding.FLOAT32, // vectorEncoding
-                    org.apache.lucene.index.VectorSimilarityFunction.EUCLIDEAN, // vectorSimilarityFunction
+                    vectorSimilarityFunction, // vectorSimilarityFunction
                     false, // softDeletes
                     false  // parentField
             );
@@ -161,12 +167,7 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
             log.info("Created complete Lucene segment with jVector index");
         }
 
-        log.info("Attempting to re-open the Lucene index created earlier");
-        try (Directory directory = FSDirectory.open(indexDirectoryPath)) {
-            IndexReader indexReader = DirectoryReader.open(directory);
-            assertEquals(numDocs, indexReader.numDocs());
-            indexReader.close();
-        }
+        testCreatedIndex(indexDirectoryPath, numDocs, vectors, 2, vectorSimilarityFunction);
     }
 
 
@@ -208,18 +209,16 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
      */
     private void writeFlatVectors(SegmentWriteState writeState, FieldInfo fieldInfo, float[][] vectors) throws IOException {
         FlatVectorsFormat flatFormat = new Lucene99FlatVectorsFormat(FlatVectorScorerUtil.getLucene99FlatVectorsScorer());
+        FlatVectorsWriter flatWriter = flatFormat.fieldsWriter(writeState);
+        FlatFieldVectorsWriter<float[]> fieldWriter = (FlatFieldVectorsWriter<float[]>) flatWriter.addField(fieldInfo);
 
-        try (FlatVectorsWriter flatWriter = flatFormat.fieldsWriter(writeState)) {
-            FlatFieldVectorsWriter<float[]> fieldWriter = (FlatFieldVectorsWriter<float[]>) flatWriter.addField(fieldInfo);
-
-            // Add all vectors to the flat writer
-            for (int i = 0; i < vectors.length; i++) {
-                fieldWriter.addValue(i, vectors[i]);
-            }
-
-            fieldWriter.finish();
-            flatWriter.finish();
+        // Add all vectors to the flat writer
+        for (int i = 0; i < vectors.length; i++) {
+            fieldWriter.addValue(i, vectors[i]);
         }
+        flatWriter.flush(vectors.length - 1, null);
+        flatWriter.finish();
+        IOUtils.close(flatWriter);
     }
 
 
@@ -372,4 +371,29 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
         }
     }
 
+    // Verify the index is created properly and check recall
+    private static void testCreatedIndex(final Path indexDirectoryPath, int expectedNumDocs, final float[][] vectors, int k, org.apache.lucene.index.VectorSimilarityFunction vectorSimilarityFunction) throws IOException {
+        log.info("Attempting to re-open the Lucene index created earlier");
+
+        final float[] target = TestUtils.generateRandomVectors(1, vectors[0].length)[0];
+        final Set<Integer> groundTruthVectorsIds = calculateGroundTruthVectorsIds(target, vectors, k, vectorSimilarityFunction);
+
+        try (Directory directory = FSDirectory.open(indexDirectoryPath);
+             IndexReader reader = DirectoryReader.open(directory)) {
+            log.info("Successfully opened the created Lucene index with {} documents", reader.numDocs());
+
+            log.info("We should now have a single segment with {} documents", expectedNumDocs);
+            Assert.assertEquals(1, reader.getContext().leaves().size());
+            Assert.assertEquals(expectedNumDocs, reader.numDocs());
+
+            final Query filterQuery = new MatchAllDocsQuery();
+            final IndexSearcher searcher = newSearcher(reader);
+            KnnFloatVectorQuery knnFloatVectorQuery = CodecTestsCommon.getJVectorKnnFloatVectorQuery(CodecTestsCommon.TEST_FIELD, target, k, filterQuery);
+            TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
+            assertEquals(k, topDocs.totalHits.value());
+            final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
+            Assert.assertEquals(1.0f, recall, 0.05f);
+            log.info("successfully completed search tests");
+        }
+    }
 }
