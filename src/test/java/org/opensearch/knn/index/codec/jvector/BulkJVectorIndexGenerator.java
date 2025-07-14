@@ -126,11 +126,13 @@ public class BulkJVectorIndexGenerator {
             // Write empty stored fields files (required even if no stored fields exist)
             writeStoredFields(writeState, randomAccessVectorValues.size(), fieldInfo);
 
+            // Write field infos
+            writeFieldInfos(directory, fieldInfos, segmentInfo);
+            
             // Write segment info
             writeSegmentInfo(directory, segmentInfo);
 
-            // Write field infos
-            writeFieldInfos(directory, fieldInfos, segmentInfo);
+
 
             // Create and write SegmentInfos (this creates the segments_1 file)
             SegmentInfos segmentInfos = new SegmentInfos(Version.LATEST.major);

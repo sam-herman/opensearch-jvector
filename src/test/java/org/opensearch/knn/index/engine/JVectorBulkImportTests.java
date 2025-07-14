@@ -14,17 +14,20 @@ import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
-import org.apache.lucene.index.SegmentReader;
-import org.apache.lucene.index.VectorSimilarityFunction;
+import org.apache.lucene.index.*;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.IOContext;
+import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.util.SetOnce;
+import org.apache.lucene.util.StringHelper;
 import org.junit.After;
 import org.junit.Test;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.client.Request;
 import org.opensearch.client.Response;
 import org.opensearch.cluster.routing.ShardRouting;
+import org.opensearch.common.lucene.Lucene;
 import org.opensearch.common.lucene.index.OpenSearchLeafReader;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
@@ -34,6 +37,7 @@ import org.opensearch.core.xcontent.MediaTypeRegistry;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.index.engine.Engine;
 import org.opensearch.index.query.QueryBuilders;
+import org.opensearch.index.seqno.SequenceNumbers;
 import org.opensearch.index.shard.IndexShard;
 import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.SpaceType;
@@ -52,6 +56,7 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import static org.opensearch.index.translog.Translog.TRANSLOG_UUID_KEY;
 import static org.opensearch.knn.common.KNNConstants.DISK_ANN;
 import static org.opensearch.knn.common.KNNConstants.KNN_ENGINE;
 import static org.opensearch.knn.common.KNNConstants.KNN_METHOD;
@@ -219,32 +224,65 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         // Get the OpenSearch data directory for the index
         //final Directory indexDataDirectory = getOpenSearchIndexDataDirectory();
         // Get the shard routing to find the exact path
+
         ShardRouting shardRouting = internalCluster().clusterService().state().routingTable().allShards(INDEX_NAME).get(0);
         IndexShard shard = getIndexShard(shardRouting, INDEX_NAME);
-        final Directory indexDataDirectory = shard.store().directory();
-        logger.info("OpenSearch index data directory: {}", indexDataDirectory);
+        final SegmentInfos preExistingSegmentInfos = shard.store().readLastCommittedSegmentsInfo();
+        final String translogUUID = preExistingSegmentInfos.getUserData().get(TRANSLOG_UUID_KEY);
+        final Path indexDataPath = shard.store().shardPath().getDataPath().resolve("index");
+        logger.info("OpenSearch index data path: {}", indexDataPath);
 
-        try (final Directory luceneIndexDirectory = FSDirectory.open(luceneIndexPath)) {
+        // First, close the index
+        client().admin().indices().prepareClose(INDEX_NAME).get();
+        logger.info("Closed index to prepare for recovery");
+
+        try (final Directory luceneIndexDirectory = FSDirectory.open(luceneIndexPath);
+             final Directory indexDataDirectory = FSDirectory.open(indexDataPath);) {
             logger.info("Lucene index directory: {}", luceneIndexDirectory);
             final String[] luceneIndexFiles = luceneIndexDirectory.listAll();
-            final Set<String> preExistingIndexDataFiles = Arrays.stream(indexDataDirectory.listAll()).collect(Collectors.toSet());
+            for (String file : indexDataDirectory.listAll()) {
+                logger.info("Deleting existing file from OpenSearch index data directory: {}", file);
+                indexDataDirectory.deleteFile(file);
+            }
             logger.info("Lucene index files to import: {}", luceneIndexFiles);
             for (String file : luceneIndexFiles) {
-                logger.info("Importing Lucene index file: {}, to: {}", file, indexDataDirectory);
-                if (preExistingIndexDataFiles.contains(file)) {
-                    logger.info("File already exists in OpenSearch index data directory, deleting to be replaced: {}", file);
-                    indexDataDirectory.deleteFile(file);
+                // For segments file we are going to modify it's user data and add the translogUUID before writing it
+                if (file.startsWith("segments_")) {
+                    logger.info("Importing Lucene segments file: {}, to: {}, appending translogUUID: {}", file, indexDataDirectory, translogUUID);
+                    // Read the segmentInfos from the lucene index to import and modify it's user data to include the expected translogUUID
+                    final IndexReader reader = DirectoryReader.open(luceneIndexDirectory);
+                    final SegmentInfos segmentInfos = Lucene.readSegmentInfos(luceneIndexDirectory);
+                    final Map<String, String> existingUserData = segmentInfos.getUserData();
+                    final Map<String, String> updatedUserData = new HashMap<>(existingUserData);
+                    updatedUserData.put(TRANSLOG_UUID_KEY, preExistingSegmentInfos.getUserData().get(TRANSLOG_UUID_KEY));
+                    updatedUserData.put(SequenceNumbers.MAX_SEQ_NO, preExistingSegmentInfos.getUserData().get(SequenceNumbers.MAX_SEQ_NO));
+                    updatedUserData.put(SequenceNumbers.LOCAL_CHECKPOINT_KEY, preExistingSegmentInfos.getUserData().get(SequenceNumbers.LOCAL_CHECKPOINT_KEY));
+                    //updatedUserData.putAll(preExistingSegmentInfos.getUserData());
+                    segmentInfos.setUserData(updatedUserData, false);
+                    try (final IndexOutput out = indexDataDirectory.createOutput(file, IOContext.DEFAULT)) {
+                        segmentInfos.write(out);
+                    }
+                    //indexDataDirectory.sync(Collections.singleton(file));
+                } else {
+                    logger.info("Importing Lucene index file: {}, to: {}", file, indexDataDirectory);
+                    indexDataDirectory.copyFrom(luceneIndexDirectory, file, file, IOContext.DEFAULT);
                 }
-                indexDataDirectory.copyFrom(luceneIndexDirectory, file, file, IOContext.DEFAULT);
+
             }
+            // write the segmentInfos file with the correct user data (e.g. translogUUID)
+
+            //SegmentCommitInfo segmentCommitInfo = segmentInfos.get().info(0);
+
+            //segmentInfos.get().commit(indexDataDirectory);
+            /*
+            try (final IndexOutput out = indexDataDirectory.createOutput(file, IOContext.DEFAULT)) {
+                segmentInfos.write(out);
+            }*/
+
         }
         logger.info("Successfully imported Lucene index files into OpenSearch index data directory");
 
         // After copying files, we need to trigger a recovery to make OpenSearch recognize the new files
-        
-        // First, close the index
-        client().admin().indices().prepareClose(INDEX_NAME).get();
-        logger.info("Closed index to prepare for recovery");
         
         // Then open it again to trigger recovery from disk
         client().admin().indices().prepareOpen(INDEX_NAME).get();
