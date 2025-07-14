@@ -86,13 +86,14 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
 
     // Verify the index is created properly and check recall
     private static void testCreatedIndex(final Path indexDirectoryPath, int expectedNumDocs, final float[][] vectors, int k, org.apache.lucene.index.VectorSimilarityFunction vectorSimilarityFunction) throws IOException {
-        log.info("Attempting to re-open the Lucene index created earlier");
+        log.info("Attempting to re-open the Lucene index created earlier in path: {}", indexDirectoryPath);
 
         final float[] target = TestUtils.generateRandomVectors(1, vectors[0].length)[0];
         final Set<Integer> groundTruthVectorsIds = calculateGroundTruthVectorsIds(target, vectors, k, vectorSimilarityFunction);
 
         try (Directory directory = FSDirectory.open(indexDirectoryPath);
-             IndexReader reader = DirectoryReader.open(directory)) {
+             IndexWriter writer = new IndexWriter(directory, newIndexWriterConfig());
+             IndexReader reader = DirectoryReader.open(writer)) {
             log.info("Successfully opened the created Lucene index with {} documents", reader.numDocs());
 
             log.info("We should now have a single segment with {} documents", expectedNumDocs);

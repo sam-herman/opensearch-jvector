@@ -56,6 +56,8 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import static org.opensearch.index.engine.Engine.HISTORY_UUID_KEY;
+import static org.opensearch.index.engine.Engine.MAX_UNSAFE_AUTO_ID_TIMESTAMP_COMMIT_ID;
 import static org.opensearch.index.translog.Translog.TRANSLOG_UUID_KEY;
 import static org.opensearch.knn.common.KNNConstants.DISK_ANN;
 import static org.opensearch.knn.common.KNNConstants.KNN_ENGINE;
@@ -112,13 +114,19 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         logger.info("Created temporary directory for Lucene index: {}", tempIndexDir);
         
         try {
-            // Step 3: Create the Lucene index with JVector
-            createLuceneIndex(tempIndexDir, vectors, VectorSimilarityFunction.EUCLIDEAN);
-            
-            // Step 4: Create the OpenSearch index with appropriate settings
+            // Step 3: Create the OpenSearch index with appropriate settings first
             createOpenSearchIndex();
-            
-            // Step 5: Import the Lucene index into OpenSearch
+
+            // Step 4: Get the existing segment generation to avoid conflicts
+            ShardRouting shardRouting = internalCluster().clusterService().state().routingTable().allShards(INDEX_NAME).get(0);
+            IndexShard shard = getIndexShard(shardRouting, INDEX_NAME);
+            final SegmentInfos preExistingSegmentInfos = shard.store().readLastCommittedSegmentsInfo();
+            long nextGeneration = preExistingSegmentInfos.getGeneration() + 1;
+
+            // Step 5: Create the Lucene index with JVector using the correct generation
+            createLuceneIndex(tempIndexDir, vectors, VectorSimilarityFunction.EUCLIDEAN, nextGeneration);
+
+            // Step 6: Import the Lucene index into OpenSearch
             importLuceneIndex(tempIndexDir);
             
             // Step 6: Verify the index was imported correctly
@@ -156,20 +164,20 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         return vectors;
     }
 
-    private void createLuceneIndex(Path indexPath, List<float[]> vectors, VectorSimilarityFunction similarityFunction) throws IOException {
-        logger.info("Creating Lucene index with {} vectors", vectors.size());
-        
+    private void createLuceneIndex(Path indexPath, List<float[]> vectors, VectorSimilarityFunction similarityFunction, long nextGeneration) throws IOException {
+        logger.info("Creating Lucene index with {} vectors and generation {}", vectors.size(), nextGeneration);
+
         // Convert vectors to RandomAccessVectorValues
         List<VectorFloat<?>> vectorFloatList = new ArrayList<>(vectors.size());
         for (float[] vector : vectors) {
             vectorFloatList.add(VECTOR_TYPE_SUPPORT.createFloatVector(vector));
         }
-        
+
         RandomAccessVectorValues randomAccessVectorValues = new ListRandomAccessVectorValues(vectorFloatList, VECTOR_DIMENSION);
-        
-        // Create the Lucene segment using BulkJVectorIndexGenerator
-        BulkJVectorIndexGenerator.createLuceneSegment(indexPath, VECTOR_DIMENSION, randomAccessVectorValues, similarityFunction);
-        
+
+        // Create the Lucene segment using BulkJVectorIndexGenerator with the specified generation
+        BulkJVectorIndexGenerator.createLuceneSegment(indexPath, VECTOR_DIMENSION, randomAccessVectorValues, similarityFunction, nextGeneration);
+
         logger.info("Successfully created Lucene index at {}", indexPath);
     }
 
@@ -250,19 +258,27 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
                 if (file.startsWith("segments_")) {
                     logger.info("Importing Lucene segments file: {}, to: {}, appending translogUUID: {}", file, indexDataDirectory, translogUUID);
                     // Read the segmentInfos from the lucene index to import and modify it's user data to include the expected translogUUID
-                    final IndexReader reader = DirectoryReader.open(luceneIndexDirectory);
                     final SegmentInfos segmentInfos = Lucene.readSegmentInfos(luceneIndexDirectory);
                     final Map<String, String> existingUserData = segmentInfos.getUserData();
                     final Map<String, String> updatedUserData = new HashMap<>(existingUserData);
                     updatedUserData.put(TRANSLOG_UUID_KEY, preExistingSegmentInfos.getUserData().get(TRANSLOG_UUID_KEY));
                     updatedUserData.put(SequenceNumbers.MAX_SEQ_NO, preExistingSegmentInfos.getUserData().get(SequenceNumbers.MAX_SEQ_NO));
                     updatedUserData.put(SequenceNumbers.LOCAL_CHECKPOINT_KEY, preExistingSegmentInfos.getUserData().get(SequenceNumbers.LOCAL_CHECKPOINT_KEY));
-                    //updatedUserData.putAll(preExistingSegmentInfos.getUserData());
+                    updatedUserData.put(HISTORY_UUID_KEY, preExistingSegmentInfos.getUserData().get(HISTORY_UUID_KEY));
+                    updatedUserData.put(MAX_UNSAFE_AUTO_ID_TIMESTAMP_COMMIT_ID, preExistingSegmentInfos.getUserData().get(MAX_UNSAFE_AUTO_ID_TIMESTAMP_COMMIT_ID));
+
+                    // Fix: Set the next write generation to be greater than the existing max segment generation
+                    // This prevents the "Next segment name counter is not greater than max segment name" error
+                    long nextGeneration = Math.max(preExistingSegmentInfos.getGeneration() + 1, segmentInfos.getGeneration() + 1);
+                    // Ensure we have a positive generation number
+                    nextGeneration = Math.max(nextGeneration, 1);
+                    //segmentInfos.setNextWriteGeneration(nextGeneration);
+                    logger.info("Set next write generation to: {}", nextGeneration);
+
                     segmentInfos.setUserData(updatedUserData, false);
                     try (final IndexOutput out = indexDataDirectory.createOutput(file, IOContext.DEFAULT)) {
                         segmentInfos.write(out);
                     }
-                    //indexDataDirectory.sync(Collections.singleton(file));
                 } else {
                     logger.info("Importing Lucene index file: {}, to: {}", file, indexDataDirectory);
                     indexDataDirectory.copyFrom(luceneIndexDirectory, file, file, IOContext.DEFAULT);
@@ -299,20 +315,6 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         client().admin().indices().prepareRefresh(INDEX_NAME).get();
         
         logger.info("Successfully imported Lucene index into OpenSearch");
-    }
-
-    private Directory getOpenSearchIndexDataDirectory() {
-        // Get the node data path from the environment
-        Path nodePath = internalCluster().getInstance(org.opensearch.env.Environment.class).dataFiles()[0];
-        logger.info("OpenSearch node data path: {}", nodePath);
-        
-        // Get the shard routing to find the exact path
-        ShardRouting shardRouting = internalCluster().clusterService().state().routingTable().allShards(INDEX_NAME).get(0);
-        IndexShard shard = getIndexShard(shardRouting, INDEX_NAME);
-        final Path indexDataPath = shard.store().shardPath().getDataPath();
-        logger.info("OpenSearch index data path: {}", indexDataPath);
-
-        return shard.store().directory();
     }
 
     private void verifyImportedIndex(int expectedDocCount) throws IOException {

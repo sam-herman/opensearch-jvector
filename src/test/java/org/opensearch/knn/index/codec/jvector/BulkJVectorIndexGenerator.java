@@ -52,9 +52,12 @@ import static org.opensearch.knn.index.codec.jvector.JVectorFormat.SIMD_POOL;
 @Log4j2
 public class BulkJVectorIndexGenerator {
     private static final String DEFAULT_SEGMENT_NAME = "_bulk";
-    private static final VectorTypeSupport VECTOR_TYPE_SUPPORT = VectorizationProvider.getInstance().getVectorTypeSupport();
 
     public static void createLuceneSegment(Path indexDirectoryPath, int dimension, RandomAccessVectorValues randomAccessVectorValues, org.apache.lucene.index.VectorSimilarityFunction vectorSimilarityFunction) throws IOException {
+        createLuceneSegment(indexDirectoryPath, dimension, randomAccessVectorValues, vectorSimilarityFunction, 1);
+    }
+
+    public static void createLuceneSegment(Path indexDirectoryPath, int dimension, RandomAccessVectorValues randomAccessVectorValues, org.apache.lucene.index.VectorSimilarityFunction vectorSimilarityFunction, long nextWriteGeneration) throws IOException {
         // create the Lucene index with the jVector vectors field
         try (Directory directory = FSDirectory.open(indexDirectoryPath)) {
 
@@ -128,7 +131,35 @@ public class BulkJVectorIndexGenerator {
 
             // Write field infos
             writeFieldInfos(directory, fieldInfos, segmentInfo);
-            
+
+            // Replace the empty set with proper file tracking
+            segmentInfo.setFiles(new HashSet<>());
+
+            // After all files are written (before creating SegmentInfos), add this code:
+            // Collect all segment files
+            Set<String> segmentFiles = new HashSet<>();
+            // Add the segment info file
+            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "si"));
+            // Add the field infos file
+            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "fnm"));
+            // Add the flat vectors files
+            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "vec"));
+            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "vemf"));
+            // Add the jVector index files
+            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name + "__" + CodecTestsCommon.TEST_FIELD, "", JVectorFormat.VECTOR_INDEX_EXTENSION));
+            final String metaFileName = IndexFileNames.segmentFileName(
+                    writeState.segmentInfo.name,
+                    writeState.segmentSuffix,
+                    JVectorFormat.META_EXTENSION
+            );
+            segmentFiles.add(metaFileName);
+            // Add stored fields files
+            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "fdt"));
+            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "fdx"));
+            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "fdm"));
+
+            // Update segment info with all files
+            segmentInfo.setFiles(segmentFiles);
             // Write segment info
             writeSegmentInfo(directory, segmentInfo);
 
@@ -138,7 +169,7 @@ public class BulkJVectorIndexGenerator {
             SegmentInfos segmentInfos = new SegmentInfos(Version.LATEST.major);
             SegmentCommitInfo segmentCommitInfo = new SegmentCommitInfo(segmentInfo, 0, 0, -1, -1, -1, StringHelper.randomId());
             segmentInfos.add(segmentCommitInfo);
-            segmentInfos.setNextWriteGeneration(1);
+            segmentInfos.setNextWriteGeneration(nextWriteGeneration);
             segmentInfos.commit(directory);
 
 
