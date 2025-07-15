@@ -175,8 +175,8 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
 
         RandomAccessVectorValues randomAccessVectorValues = new ListRandomAccessVectorValues(vectorFloatList, VECTOR_DIMENSION);
 
-        // Create the Lucene segment using BulkJVectorIndexGenerator with the specified generation
-        BulkJVectorIndexGenerator.createLuceneSegment(indexPath, VECTOR_DIMENSION, randomAccessVectorValues, similarityFunction, nextGeneration);
+        // Create the Lucene segment using BulkJVectorIndexGenerator with the specified generation and field name
+        BulkJVectorIndexGenerator.createLuceneSegment(indexPath, VECTOR_DIMENSION, randomAccessVectorValues, similarityFunction, nextGeneration, FIELD_NAME);
 
         logger.info("Successfully created Lucene index at {}", indexPath);
     }

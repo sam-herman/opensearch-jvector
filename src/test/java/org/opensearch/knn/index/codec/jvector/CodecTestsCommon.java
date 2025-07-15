@@ -1,5 +1,7 @@
 package org.opensearch.knn.index.codec.jvector;
 
+import org.apache.lucene.codecs.Codec;
+import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.Query;
@@ -7,6 +9,7 @@ import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.junit.Assert;
 import org.opensearch.knn.common.KNNConstants;
+import org.opensearch.knn.index.codec.KNNCodecVersion;
 
 import java.io.IOException;
 import java.util.HashSet;

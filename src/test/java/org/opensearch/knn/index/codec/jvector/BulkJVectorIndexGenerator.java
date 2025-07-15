@@ -10,8 +10,6 @@ import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
 import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
-import io.github.jbellis.jvector.vector.VectorizationProvider;
-import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import lombok.extern.log4j.Log4j2;
 import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.codecs.StoredFieldsWriter;
@@ -37,6 +35,8 @@ import java.time.Clock;
 import java.util.*;
 import java.util.stream.IntStream;
 
+import static org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat.PER_FIELD_FORMAT_KEY;
+import static org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat.PER_FIELD_SUFFIX_KEY;
 import static org.opensearch.knn.index.codec.jvector.JVectorFormat.SIMD_POOL;
 
 /**
@@ -58,12 +58,19 @@ public class BulkJVectorIndexGenerator {
     }
 
     public static void createLuceneSegment(Path indexDirectoryPath, int dimension, RandomAccessVectorValues randomAccessVectorValues, org.apache.lucene.index.VectorSimilarityFunction vectorSimilarityFunction, long nextWriteGeneration) throws IOException {
+        createLuceneSegment(indexDirectoryPath, dimension, randomAccessVectorValues, vectorSimilarityFunction, nextWriteGeneration, CodecTestsCommon.TEST_FIELD);
+    }
+
+    public static void createLuceneSegment(Path indexDirectoryPath, int dimension, RandomAccessVectorValues randomAccessVectorValues, org.apache.lucene.index.VectorSimilarityFunction vectorSimilarityFunction, long nextWriteGeneration, String fieldName) throws IOException {
         // create the Lucene index with the jVector vectors field
         try (Directory directory = FSDirectory.open(indexDirectoryPath)) {
 
             // Create FieldInfo and FieldInfos
+            Map<String, String> vectorFieldAttributes = new HashMap<>();
+            vectorFieldAttributes.put(PER_FIELD_FORMAT_KEY, JVectorFormat.NAME);
+            vectorFieldAttributes.put(PER_FIELD_SUFFIX_KEY, Long.toString(0));
             FieldInfo fieldInfo = new FieldInfo(
-                    CodecTestsCommon.TEST_FIELD,
+                    fieldName,
                     0, // field number
                     false, // storeTermVector
                     false, // omitNorms
@@ -72,7 +79,7 @@ public class BulkJVectorIndexGenerator {
                     DocValuesType.NONE, // docValuesType
                     DocValuesSkipIndexType.NONE, // docValues skip index
                     -1, // dvGen
-                    Collections.emptyMap(), // attributes
+                    vectorFieldAttributes, // attributes
                     0, // pointDimensionCount
                     0, // pointIndexDimensionCount
                     0, // pointNumBytes
@@ -84,10 +91,10 @@ public class BulkJVectorIndexGenerator {
             );
 
             FieldInfos fieldInfos = new FieldInfos(new FieldInfo[]{fieldInfo});
-            // Add required stored fields format mode to attributes
-            Map<String, String> attributes = new HashMap<>();
-            attributes.put("Lucene90StoredFieldsFormat.mode", "BEST_SPEED");
 
+            // Add required stored fields format mode to segment attributes
+            Map<String, String> segmentAttributes = new HashMap<>();
+            segmentAttributes.put("Lucene90StoredFieldsFormat.mode", "BEST_SPEED");
             SegmentInfo segmentInfo = new SegmentInfo(
                     directory,
                     Version.LATEST,
@@ -96,10 +103,10 @@ public class BulkJVectorIndexGenerator {
                     randomAccessVectorValues.size(), // maxDoc
                     false, // useCompoundFile
                     false, // has blocks
-                    new JVectorCodec(Integer.MAX_VALUE, true), // codec
+                    JVectorCodecUtils.getCodec(), // codec
                     Collections.emptyMap(), // diagnostics
                     UUID.randomUUID().toString().substring(0, 16).getBytes(), // id
-                    attributes, // attributes
+                    segmentAttributes, // attributes
                     null // indexSort
             );
 
@@ -120,11 +127,15 @@ public class BulkJVectorIndexGenerator {
 
             final OnHeapGraphIndex preBuiltGraph = buildJVectorIndex(randomAccessVectorValues, JVectorWriter.getVectorSimilarityFunction(fieldInfo));
 
+            // Create a SegmentWriteState for the vector fields
+            final String vectorFieldsSegmentSuffix = JVectorFormat.NAME + "_" + Long.toString(0);
+            final SegmentWriteState vectorFieldsWriteState = new SegmentWriteState(writeState, vectorFieldsSegmentSuffix);
+
             // Write flat vectors (required by JVectorWriter)
-            writeFlatVectors(writeState, fieldInfo, randomAccessVectorValues);
+            writeFlatVectors(vectorFieldsWriteState, fieldInfo, randomAccessVectorValues);
 
             // Write jVector index using pre-built graph
-            writeJVectorIndex(writeState, fieldInfo, preBuiltGraph, randomAccessVectorValues);
+            writeJVectorIndex(vectorFieldsWriteState, fieldInfo, preBuiltGraph, randomAccessVectorValues);
 
             // Write empty stored fields files (required even if no stored fields exist)
             writeStoredFields(writeState, randomAccessVectorValues.size(), fieldInfo);
@@ -135,28 +146,13 @@ public class BulkJVectorIndexGenerator {
             // Replace the empty set with proper file tracking
             segmentInfo.setFiles(new HashSet<>());
 
-            // After all files are written (before creating SegmentInfos), add this code:
-            // Collect all segment files
+            // After all files are written (before creating SegmentInfos), collect all segment files:
             Set<String> segmentFiles = new HashSet<>();
-            // Add the segment info file
-            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "si"));
-            // Add the field infos file
-            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "fnm"));
-            // Add the flat vectors files
-            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "vec"));
-            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "vemf"));
-            // Add the jVector index files
-            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name + "__" + CodecTestsCommon.TEST_FIELD, "", JVectorFormat.VECTOR_INDEX_EXTENSION));
-            final String metaFileName = IndexFileNames.segmentFileName(
-                    writeState.segmentInfo.name,
-                    writeState.segmentSuffix,
-                    JVectorFormat.META_EXTENSION
-            );
-            segmentFiles.add(metaFileName);
-            // Add stored fields files
-            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "fdt"));
-            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "fdx"));
-            segmentFiles.add(IndexFileNames.segmentFileName(segmentInfo.name, "", "fdm"));
+            for (String file : directory.listAll()) {
+                if (file.startsWith(segmentInfo.name)) {
+                    segmentFiles.add(file);
+                }
+            }
 
             // Update segment info with all files
             segmentInfo.setFiles(segmentFiles);

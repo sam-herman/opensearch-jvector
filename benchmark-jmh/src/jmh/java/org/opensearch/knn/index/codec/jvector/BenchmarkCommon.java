@@ -21,8 +21,8 @@ public class BenchmarkCommon {
 
     public static Codec getCodec(String codecType) {
         return switch (codecType) {
-            case JVECTOR_NOT_QUANTIZED -> new JVectorCodec(Integer.MAX_VALUE, true);
-            case JVECTOR_QUANTIZED -> new JVectorCodec(DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION, true);
+            case JVECTOR_NOT_QUANTIZED -> JVectorCodecUtils.getCodec(Integer.MAX_VALUE, true);
+            case JVECTOR_QUANTIZED -> JVectorCodecUtils.getCodec(DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION, true);
             case LUCENE101 -> new Lucene101Codec();
             default -> throw new IllegalStateException("Unexpected codec type: " + codecType);
         };
