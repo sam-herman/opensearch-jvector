@@ -105,7 +105,7 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
             KnnFloatVectorQuery knnFloatVectorQuery = CodecTestsCommon.getJVectorKnnFloatVectorQuery(CodecTestsCommon.TEST_FIELD, target, k, filterQuery);
             TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
             assertEquals(k, topDocs.totalHits.value());
-            final float recall = CodecTestsCommon.calculateRecall(reader, groundTruthVectorsIds, CodecTestsCommon.TEST_FIELD, topDocs, k);
+            final float recall = CodecTestsCommon.calculateRecallFromGlobalIdField(reader, groundTruthVectorsIds, topDocs, k);
             Assert.assertEquals(1.0f, recall, 0.05f);
             log.info("successfully completed search tests");
         }

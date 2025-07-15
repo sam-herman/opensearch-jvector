@@ -6,6 +6,7 @@
 package org.opensearch.knn.index.engine;
 
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
+import com.google.common.primitives.Floats;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
@@ -39,6 +40,8 @@ import org.opensearch.index.engine.Engine;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.index.seqno.SequenceNumbers;
 import org.opensearch.index.shard.IndexShard;
+import org.opensearch.knn.KNNResult;
+import org.opensearch.knn.TestUtils;
 import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.ThreadLeakFiltersForTests;
@@ -65,6 +68,7 @@ import static org.opensearch.knn.common.KNNConstants.KNN_METHOD;
 import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_SPACE_TYPE;
 import static org.opensearch.knn.common.KNNConstants.PARAMETERS;
 import static org.opensearch.knn.common.KNNConstants.VECTOR_DATA_TYPE_FIELD;
+import static org.opensearch.knn.index.codec.jvector.CodecTestsCommon.calculateGroundTruthVectorsIds;
 import static org.opensearch.knn.index.engine.CommonTestUtils.PROPERTIES_FIELD_NAME;
 
 /**
@@ -106,9 +110,11 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
     @Test
     public void testBulkImportJVectorIndex() throws Exception {
         // Step 1: Generate test vectors
-        int numVectors = 100;
-        List<float[]> vectors = generateTestVectors(numVectors, VECTOR_DIMENSION);
-        
+        final int k = 10;
+        final int numVectors = 100;
+        final VectorSimilarityFunction vectorSimilarityFunction = VectorSimilarityFunction.EUCLIDEAN;
+        float[][] vectors = TestUtils.generateRandomVectors(numVectors, VECTOR_DIMENSION);
+
         // Step 2: Create a temporary directory for the Lucene index
         Path tempIndexDir = Files.createTempDirectory("jvector-temp-index");
         logger.info("Created temporary directory for Lucene index: {}", tempIndexDir);
@@ -124,7 +130,7 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
             long nextGeneration = preExistingSegmentInfos.getGeneration() + 1;
 
             // Step 5: Create the Lucene index with JVector using the correct generation
-            createLuceneIndex(tempIndexDir, vectors, VectorSimilarityFunction.EUCLIDEAN, nextGeneration);
+            createLuceneIndex(tempIndexDir, vectors, vectorSimilarityFunction, nextGeneration);
 
             // Step 6: Import the Lucene index into OpenSearch
             importLuceneIndex(tempIndexDir);
@@ -136,7 +142,7 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
             verifyJVectorEngineIsUsed();
             
             // Step 8: Test search functionality
-            testSearchFunctionality(vectors);
+            testSearchFunctionality(k, vectors, vectorSimilarityFunction);
             
         } finally {
             // Clean up temporary directory
@@ -152,23 +158,11 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         }
     }
 
-    private List<float[]> generateTestVectors(int count, int dimension) {
-        List<float[]> vectors = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            float[] vector = new float[dimension];
-            for (int j = 0; j < dimension; j++) {
-                vector[j] = random().nextFloat();
-            }
-            vectors.add(vector);
-        }
-        return vectors;
-    }
-
-    private void createLuceneIndex(Path indexPath, List<float[]> vectors, VectorSimilarityFunction similarityFunction, long nextGeneration) throws IOException {
-        logger.info("Creating Lucene index with {} vectors and generation {}", vectors.size(), nextGeneration);
+    private void createLuceneIndex(Path indexPath, float[][] vectors, VectorSimilarityFunction similarityFunction, long nextGeneration) throws IOException {
+        logger.info("Creating Lucene index with {} vectors and generation {}", vectors.length, nextGeneration);
 
         // Convert vectors to RandomAccessVectorValues
-        List<VectorFloat<?>> vectorFloatList = new ArrayList<>(vectors.size());
+        List<VectorFloat<?>> vectorFloatList = new ArrayList<>(vectors.length);
         for (float[] vector : vectors) {
             vectorFloatList.add(VECTOR_TYPE_SUPPORT.createFloatVector(vector));
         }
@@ -357,26 +351,45 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         logger.info("Successfully verified JVector engine is being used");
     }
 
-    private void testSearchFunctionality(List<float[]> vectors) throws IOException, ParseException {
+    /**
+     * Test the search functionality of the imported index by calculating recall
+     *
+     * @param k number of nearest neighbors to search for
+     * @param vectors vectors that were indexed
+     * @param vectorSimilarityFunction similarity function used to index the vectors
+     * @throws IOException IOException
+     * @throws ParseException ParseException
+     */
+    private void testSearchFunctionality(int k, float[][] vectors, VectorSimilarityFunction vectorSimilarityFunction) throws IOException, ParseException {
         // Pick a random vector to search with
-        float[] queryVector = vectors.get(random().nextInt(vectors.size()));
-        int k = 5;
-        
+        final float[] target = TestUtils.generateRandomVectors(1, vectors[0].length)[0];
+
         // Execute KNN search
-        Response searchResponse = searchKNNIndex(INDEX_NAME, new KNNQueryBuilder(FIELD_NAME, queryVector, k), k);
-        assertEquals(RestStatus.OK, RestStatus.fromCode(searchResponse.getStatusLine().getStatusCode()));
-        
+        Response response = searchKNNIndex(INDEX_NAME, new KNNQueryBuilder(FIELD_NAME, target, k), k);
+        assertEquals(RestStatus.OK, RestStatus.fromCode(response.getStatusLine().getStatusCode()));
+
+        List<KNNResult> results = parseSearchResponse(EntityUtils.toString(response.getEntity()), FIELD_NAME);
+        // Verify we got k results (or all docs if less than k)
+        assertEquals(Math.min(k, vectors.length), results.size());
+
         // Parse and verify results
-        String responseBody = EntityUtils.toString(searchResponse.getEntity());
-        Map<String, Object> responseMap = createParser(MediaTypeRegistry.getDefaultMediaType().xContent(), responseBody).map();
-        Map<String, Object> hits = (Map<String, Object>) responseMap.get("hits");
-        List<Map<String, Object>> hitsList = (List<Map<String, Object>>) hits.get("hits");
-        
-        // Verify we got results
-        assertFalse("Search should return results", hitsList.isEmpty());
-        assertTrue("Search should return at most k results", hitsList.size() <= k);
-        
-        logger.info("Successfully tested search functionality with {} results", hitsList.size());
+        // Calculate ground truth with brute force
+        logger.info("Calculating ground truth");
+        final SpaceType spaceType = switch (vectorSimilarityFunction) {
+            case EUCLIDEAN -> SpaceType.L2;
+            case DOT_PRODUCT -> SpaceType.INNER_PRODUCT;
+            case COSINE -> SpaceType.COSINESIMIL;
+            default ->
+                    throw new IllegalArgumentException("Unsupported similarity function: " + vectorSimilarityFunction);
+        };
+        List<Set<String>> groundTruth = TestUtils.computeGroundTruthValues(vectors, new float[][] { target }, spaceType, k);
+        assertEquals(1, groundTruth.size());
+        Set<String> expectedDocIds = groundTruth.getFirst();
+
+        // calculate recall
+        logger.info("Calculating recall");
+        float recall = ((float) results.stream().filter(r -> expectedDocIds.contains(r.getDocId())).count()) / ((float) k);
+        assertTrue("Expected recall to be at least 0.9 but got " + recall, recall >= 0.9);
     }
 
     private Response searchKNNIndex(String indexName, KNNQueryBuilder knnQueryBuilder, int size) throws IOException {
@@ -402,5 +415,37 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         Map<String, Object> responseMap = createParser(MediaTypeRegistry.getDefaultMediaType().xContent(), responseBody).map();
         
         return (Map<String, Object>) ((Map<String, Object>) responseMap.get(index)).get("mappings");
+    }
+
+    /**
+     * Parse the response of KNN search into a List of KNNResults
+     */
+    protected List<KNNResult> parseSearchResponse(String responseBody, String fieldName) throws IOException {
+        @SuppressWarnings("unchecked")
+        List<Object> hits = (List<Object>) ((Map<String, Object>) createParser(
+                MediaTypeRegistry.getDefaultMediaType().xContent(),
+                responseBody
+        ).map().get("hits")).get("hits");
+
+        @SuppressWarnings("unchecked")
+        List<KNNResult> knnSearchResponses = hits.stream().map(hit -> {
+            // We are not going to include the float[] vector in the KNNResult since we don't need it for recall calculation, also it's
+            // not returned in the response because it's not stored in _source.
+            /*final float[] vector = Floats.toArray(
+                    Arrays.stream(
+                            ((ArrayList<Float>) ((Map<String, Object>) ((Map<String, Object>) hit).get("_source")).get(fieldName)).toArray()
+                    ).map(Object::toString).map(Float::valueOf).collect(Collectors.toList())
+            );*/
+            //TODO: fix this mapping
+            //(String) ((Map<String, Object>) hit).get("_id")
+            final String id = (String) ((Map<String, Object>) ((Map<String, Object>) hit).get("_source")).get("id");
+            return new KNNResult(
+                    id,
+                    new float[]{},
+                    ((Double) ((Map<String, Object>) hit).get("_score")).floatValue()
+            );
+        }).collect(Collectors.toList());
+
+        return knnSearchResponses;
     }
 }

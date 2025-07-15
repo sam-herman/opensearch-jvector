@@ -23,11 +23,12 @@ import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.util.IOUtils;
-import org.apache.lucene.util.InfoStream;
-import org.apache.lucene.util.StringHelper;
-import org.apache.lucene.util.Version;
+import org.apache.lucene.util.*;
+import org.opensearch.index.mapper.Uid;
 import org.opensearch.knn.common.KNNConstants;
+import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.core.xcontent.MediaTypeRegistry;
+import org.opensearch.core.common.bytes.BytesReference;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -52,6 +53,8 @@ import static org.opensearch.knn.index.codec.jvector.JVectorFormat.SIMD_POOL;
 @Log4j2
 public class BulkJVectorIndexGenerator {
     private static final String DEFAULT_SEGMENT_NAME = "_bulk";
+    private static final String SOURCE_FIELD_NAME = "_source";
+    private static final String ID_FIELD_NAME = "_id";
 
     public static void createLuceneSegment(Path indexDirectoryPath, int dimension, RandomAccessVectorValues randomAccessVectorValues, org.apache.lucene.index.VectorSimilarityFunction vectorSimilarityFunction) throws IOException {
         createLuceneSegment(indexDirectoryPath, dimension, randomAccessVectorValues, vectorSimilarityFunction, 1);
@@ -69,7 +72,7 @@ public class BulkJVectorIndexGenerator {
             Map<String, String> vectorFieldAttributes = new HashMap<>();
             vectorFieldAttributes.put(PER_FIELD_FORMAT_KEY, JVectorFormat.NAME);
             vectorFieldAttributes.put(PER_FIELD_SUFFIX_KEY, Long.toString(0));
-            FieldInfo fieldInfo = new FieldInfo(
+            final FieldInfo vectorFieldInfo = new FieldInfo(
                     fieldName,
                     0, // field number
                     false, // storeTermVector
@@ -90,7 +93,49 @@ public class BulkJVectorIndexGenerator {
                     false  // parentField
             );
 
-            FieldInfos fieldInfos = new FieldInfos(new FieldInfo[]{fieldInfo});
+            final FieldInfo sourceFieldInfo = new FieldInfo(
+                    SOURCE_FIELD_NAME,
+                    1, // field number
+                    false, // storeTermVector
+                    false, // omitNorms
+                    true, // storePayloads
+                    IndexOptions.NONE, // indexOptions
+                    DocValuesType.NONE, // docValuesType
+                    DocValuesSkipIndexType.NONE, // docValues skip index
+                    -1, // dvGen
+                    new HashMap<>(), // attributes
+                    0, // pointDimensionCount
+                    0, // pointIndexDimensionCount
+                    0, // pointNumBytes
+                    0, // vectorDimension
+                    VectorEncoding.FLOAT32, // vectorEncoding
+                    vectorSimilarityFunction, // vectorSimilarityFunction
+                    false, // softDeletes
+                    false  // parentField
+            );
+
+            final FieldInfo idFieldInfo = new FieldInfo(
+                    ID_FIELD_NAME,
+                    2, // field number
+                    false, // storeTermVector
+                    false, // omitNorms
+                    true, // storePayloads
+                    IndexOptions.NONE, // indexOptions
+                    DocValuesType.NONE, // docValuesType
+                    DocValuesSkipIndexType.NONE, // docValues skip index
+                    -1, // dvGen
+                    new HashMap<>(), // attributes
+                    0, // pointDimensionCount
+                    0, // pointIndexDimensionCount
+                    0, // pointNumBytes
+                    0, // vectorDimension
+                    VectorEncoding.FLOAT32, // vectorEncoding
+                    vectorSimilarityFunction, // vectorSimilarityFunction
+                    false, // softDeletes
+                    false  // parentField
+            );
+
+            FieldInfos fieldInfos = new FieldInfos(new FieldInfo[]{vectorFieldInfo, sourceFieldInfo, idFieldInfo});
 
             // Add required stored fields format mode to segment attributes
             Map<String, String> segmentAttributes = new HashMap<>();
@@ -125,26 +170,23 @@ public class BulkJVectorIndexGenerator {
                     ""
             );
 
-            final OnHeapGraphIndex preBuiltGraph = buildJVectorIndex(randomAccessVectorValues, JVectorWriter.getVectorSimilarityFunction(fieldInfo));
+            final OnHeapGraphIndex preBuiltGraph = buildJVectorIndex(randomAccessVectorValues, JVectorWriter.getVectorSimilarityFunction(vectorFieldInfo));
 
             // Create a SegmentWriteState for the vector fields
             final String vectorFieldsSegmentSuffix = JVectorFormat.NAME + "_" + Long.toString(0);
             final SegmentWriteState vectorFieldsWriteState = new SegmentWriteState(writeState, vectorFieldsSegmentSuffix);
 
             // Write flat vectors (required by JVectorWriter)
-            writeFlatVectors(vectorFieldsWriteState, fieldInfo, randomAccessVectorValues);
+            writeFlatVectors(vectorFieldsWriteState, vectorFieldInfo, randomAccessVectorValues);
 
             // Write jVector index using pre-built graph
-            writeJVectorIndex(vectorFieldsWriteState, fieldInfo, preBuiltGraph, randomAccessVectorValues);
+            writeJVectorIndex(vectorFieldsWriteState, vectorFieldInfo, preBuiltGraph, randomAccessVectorValues);
 
-            // Write empty stored fields files (required even if no stored fields exist)
-            writeStoredFields(writeState, randomAccessVectorValues.size(), fieldInfo);
+            // Write stored fields for _source field and _id field
+            writeStoredFields(writeState, randomAccessVectorValues.size(), sourceFieldInfo, idFieldInfo);
 
             // Write field infos
             writeFieldInfos(directory, fieldInfos, segmentInfo);
-
-            // Replace the empty set with proper file tracking
-            segmentInfo.setFiles(new HashSet<>());
 
             // After all files are written (before creating SegmentInfos), collect all segment files:
             Set<String> segmentFiles = new HashSet<>();
@@ -189,16 +231,31 @@ public class BulkJVectorIndexGenerator {
 
 
     /**
-     * Writes empty stored fields files
+     * Writes stored fields with proper _source field containing document data and _id field containing document id
      */
-    private static void writeStoredFields(SegmentWriteState writeState, int numDocs, FieldInfo fieldInfo) throws IOException {
+    private static void writeStoredFields(SegmentWriteState writeState, int numDocs, FieldInfo sourceFieldInfo, FieldInfo idFieldInfo) throws IOException {
         try (StoredFieldsWriter storedFieldsWriter = writeState.segmentInfo.getCodec().storedFieldsFormat()
                 .fieldsWriter(writeState.directory, writeState.segmentInfo, writeState.context)) {
 
-            // Write empty documents (no stored fields)
             for (int i = 0; i < numDocs; i++) {
+                final String id = Integer.toString(i, 10);
+
                 storedFieldsWriter.startDocument();
-                storedFieldsWriter.writeField(fieldInfo, i);
+
+                // Create source document with id field
+                Map<String, Object> sourceDoc = new HashMap<>();
+                sourceDoc.put("id", id);
+
+                // Convert to JSON bytes using OpenSearch's XContentBuilder
+                XContentBuilder builder = MediaTypeRegistry.contentBuilder(MediaTypeRegistry.JSON).map(sourceDoc);
+                BytesReference sourceBytes = BytesReference.bytes(builder);
+
+                // Write the _source field as binary
+                storedFieldsWriter.writeField(sourceFieldInfo, sourceBytes.toBytesRef());
+
+                // Write the _id field as string
+                final BytesRef encodedId = Uid.encodeId(id);
+                storedFieldsWriter.writeField(idFieldInfo, encodedId);
                 storedFieldsWriter.finishDocument();
             }
 

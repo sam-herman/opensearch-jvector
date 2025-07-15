@@ -8,17 +8,65 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.TopDocs;
 import org.junit.Assert;
+import org.opensearch.common.collect.Tuple;
+import org.opensearch.common.xcontent.XContentHelper;
+import org.opensearch.core.common.bytes.BytesReference;
+import org.opensearch.core.xcontent.MediaType;
+import org.opensearch.core.xcontent.MediaTypeRegistry;
+import org.opensearch.index.mapper.Uid;
 import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.codec.KNNCodecVersion;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 
 public class CodecTestsCommon {
     public static final String TEST_FIELD = "test_field";
     public static final String TEST_ID_FIELD = "id";
+
+    public static float calculateRecallFromSource(IndexReader reader, Set<Integer> groundTruthVectorsIds, TopDocs topDocs, int k)
+            throws IOException {
+        final ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+        Assert.assertEquals(groundTruthVectorsIds.size(), scoreDocs.length);
+        int totalRelevantDocs = 0;
+        for (ScoreDoc scoreDoc : scoreDocs) {
+            var source = reader.storedFields().document(scoreDoc.doc).getField("_source").storedValue().getBinaryValue().utf8ToString();
+            // source is a json string with the following format: {"_id": 1, "test_field": [0.0, 1.0]}
+            // Parse the JSON source using XContentHelper
+            Tuple<? extends MediaType, Map<String, Object>> mapTuple = XContentHelper.convertToMap(
+                    BytesReference.fromByteBuffer(ByteBuffer.wrap(source.getBytes())),
+                    true,
+                    MediaTypeRegistry.JSON
+            );
+            Map<String, Object> sourceMap = mapTuple.v2();
+
+            // Extract the id field from the source
+            Integer id = Integer.valueOf((String) sourceMap.get("id"));
+            if (groundTruthVectorsIds.contains(id)) {
+                totalRelevantDocs++;
+            }
+        }
+        return ((float) totalRelevantDocs) / ((float) k);
+    }
+
+    public static float calculateRecallFromGlobalIdField(IndexReader reader, Set<Integer> groundTruthVectorsIds, TopDocs topDocs, int k)
+            throws IOException {
+        final ScoreDoc[] scoreDocs = topDocs.scoreDocs;
+        Assert.assertEquals(groundTruthVectorsIds.size(), scoreDocs.length);
+        int totalRelevantDocs = 0;
+        for (ScoreDoc scoreDoc : scoreDocs) {
+            final String decodeId = Uid.decodeId(reader.storedFields().document(scoreDoc.doc).getField("_id").storedValue().getBinaryValue().bytes);
+            final int id = Integer.valueOf(decodeId, 10);
+            if (groundTruthVectorsIds.contains(id)) {
+                totalRelevantDocs++;
+            }
+        }
+        return ((float) totalRelevantDocs) / ((float) k);
+    }
 
     public static float calculateRecall(IndexReader reader, Set<Integer> groundTruthVectorsIds, String field, TopDocs topDocs, int k)
             throws IOException {
