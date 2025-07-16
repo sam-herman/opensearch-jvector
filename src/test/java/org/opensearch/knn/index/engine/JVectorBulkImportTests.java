@@ -436,9 +436,10 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
                             ((ArrayList<Float>) ((Map<String, Object>) ((Map<String, Object>) hit).get("_source")).get(fieldName)).toArray()
                     ).map(Object::toString).map(Float::valueOf).collect(Collectors.toList())
             );*/
-            //TODO: fix this mapping
-            //(String) ((Map<String, Object>) hit).get("_id")
-            final String id = (String) ((Map<String, Object>) ((Map<String, Object>) hit).get("_source")).get("id");
+            // This is using the global doc id
+            final String id = (String) ((Map<String, Object>) hit).get("_id");
+            // The generator also recorded the id is stored in _source as "id" field
+            //final String id = (String) ((Map<String, Object>) ((Map<String, Object>) hit).get("_source")).get("id");
             return new KNNResult(
                     id,
                     new float[]{},
