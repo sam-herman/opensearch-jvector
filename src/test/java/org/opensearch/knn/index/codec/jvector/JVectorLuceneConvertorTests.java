@@ -1,54 +1,32 @@
+/*
+ * Copyright OpenSearch Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package org.opensearch.knn.index.codec.jvector;
 
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
-import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
-import io.github.jbellis.jvector.graph.OnHeapGraphIndex;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
-import io.github.jbellis.jvector.graph.disk.OnDiskSequentialGraphIndexWriter;
-import io.github.jbellis.jvector.graph.disk.feature.Feature;
-import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
-import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
-import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
-import io.github.jbellis.jvector.quantization.PQVectors;
-import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import lombok.extern.log4j.Log4j2;
-import org.apache.lucene.codecs.CodecUtil;
-import org.apache.lucene.codecs.StoredFieldsWriter;
-import org.apache.lucene.codecs.hnsw.FlatFieldVectorsWriter;
-import org.apache.lucene.codecs.hnsw.FlatVectorScorerUtil;
-import org.apache.lucene.codecs.hnsw.FlatVectorsFormat;
-import org.apache.lucene.codecs.hnsw.FlatVectorsWriter;
-import org.apache.lucene.codecs.lucene99.Lucene99FlatVectorsFormat;
 import org.apache.lucene.index.*;
 import org.apache.lucene.search.*;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.store.IOContext;
-import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.tests.util.LuceneTestCase;
-import org.apache.lucene.util.IOUtils;
-import org.apache.lucene.util.InfoStream;
-import org.apache.lucene.util.StringHelper;
-import org.apache.lucene.util.Version;
 import org.junit.Assert;
 import org.junit.Test;
 import org.opensearch.knn.TestUtils;
-import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.ThreadLeakFiltersForTests;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.time.Clock;
 import java.util.*;
-import java.util.stream.IntStream;
 
-import static org.opensearch.knn.index.codec.jvector.CodecTestsCommon.TEST_FIELD;
 import static org.opensearch.knn.index.codec.jvector.CodecTestsCommon.calculateGroundTruthVectorsIds;
-import static org.opensearch.knn.index.codec.jvector.JVectorFormat.SIMD_POOL;
 
 @ThreadLeakFilters(defaultFilters = true, filters = { ThreadLeakFiltersForTests.class })
 @Log4j2

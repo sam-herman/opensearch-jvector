@@ -1,7 +1,10 @@
+/*
+ * Copyright OpenSearch Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package org.opensearch.knn.index.codec.jvector;
 
-import org.apache.lucene.codecs.Codec;
-import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.search.Query;
@@ -15,7 +18,6 @@ import org.opensearch.core.xcontent.MediaType;
 import org.opensearch.core.xcontent.MediaTypeRegistry;
 import org.opensearch.index.mapper.Uid;
 import org.opensearch.knn.common.KNNConstants;
-import org.opensearch.knn.index.codec.KNNCodecVersion;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

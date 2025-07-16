@@ -25,8 +25,9 @@ import org.apache.lucene.util.StringHelper;
 import org.junit.After;
 import org.junit.Test;
 import org.opensearch.action.search.SearchResponse;
-import org.opensearch.client.Request;
-import org.opensearch.client.Response;
+import org.opensearch.client.*;
+import org.opensearch.client.indices.GetIndexRequest;
+import org.opensearch.client.indices.GetIndexResponse;
 import org.opensearch.cluster.routing.ShardRouting;
 import org.opensearch.common.lucene.Lucene;
 import org.opensearch.common.lucene.index.OpenSearchLeafReader;
@@ -47,6 +48,7 @@ import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.ThreadLeakFiltersForTests;
 import org.opensearch.knn.index.VectorDataType;
 import org.opensearch.knn.index.codec.jvector.BulkJVectorIndexGenerator;
+import org.opensearch.knn.index.codec.jvector.IndexImporter;
 import org.opensearch.knn.index.query.KNNQueryBuilder;
 import org.opensearch.knn.plugin.JVectorKNNPlugin;
 import org.opensearch.plugins.Plugin;
@@ -56,6 +58,7 @@ import org.opensearch.transport.Netty4ModulePlugin;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -221,96 +224,23 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         assertEquals(request.getEndpoint() + ": failed", RestStatus.OK, RestStatus.fromCode(response.getStatusLine().getStatusCode()));
     }
 
-    private void importLuceneIndex(Path luceneIndexPath) throws IOException {
-        logger.info("Importing Lucene index into OpenSearch");
-        
-        // Get the OpenSearch data directory for the index
-        //final Directory indexDataDirectory = getOpenSearchIndexDataDirectory();
-        // Get the shard routing to find the exact path
-
-        ShardRouting shardRouting = internalCluster().clusterService().state().routingTable().allShards(INDEX_NAME).get(0);
-        IndexShard shard = getIndexShard(shardRouting, INDEX_NAME);
-        final SegmentInfos preExistingSegmentInfos = shard.store().readLastCommittedSegmentsInfo();
-        final String translogUUID = preExistingSegmentInfos.getUserData().get(TRANSLOG_UUID_KEY);
-        final Path indexDataPath = shard.store().shardPath().getDataPath().resolve("index");
-        logger.info("OpenSearch index data path: {}", indexDataPath);
-
-        // First, close the index
-        client().admin().indices().prepareClose(INDEX_NAME).get();
-        logger.info("Closed index to prepare for recovery");
-
-        try (final Directory luceneIndexDirectory = FSDirectory.open(luceneIndexPath);
-             final Directory indexDataDirectory = FSDirectory.open(indexDataPath);) {
-            logger.info("Lucene index directory: {}", luceneIndexDirectory);
-            final String[] luceneIndexFiles = luceneIndexDirectory.listAll();
-            for (String file : indexDataDirectory.listAll()) {
-                logger.info("Deleting existing file from OpenSearch index data directory: {}", file);
-                indexDataDirectory.deleteFile(file);
-            }
-            logger.info("Lucene index files to import: {}", luceneIndexFiles);
-            for (String file : luceneIndexFiles) {
-                // For segments file we are going to modify it's user data and add the translogUUID before writing it
-                if (file.startsWith("segments_")) {
-                    logger.info("Importing Lucene segments file: {}, to: {}, appending translogUUID: {}", file, indexDataDirectory, translogUUID);
-                    // Read the segmentInfos from the lucene index to import and modify it's user data to include the expected translogUUID
-                    final SegmentInfos segmentInfos = Lucene.readSegmentInfos(luceneIndexDirectory);
-                    final Map<String, String> existingUserData = segmentInfos.getUserData();
-                    final Map<String, String> updatedUserData = new HashMap<>(existingUserData);
-                    updatedUserData.put(TRANSLOG_UUID_KEY, preExistingSegmentInfos.getUserData().get(TRANSLOG_UUID_KEY));
-                    updatedUserData.put(SequenceNumbers.MAX_SEQ_NO, preExistingSegmentInfos.getUserData().get(SequenceNumbers.MAX_SEQ_NO));
-                    updatedUserData.put(SequenceNumbers.LOCAL_CHECKPOINT_KEY, preExistingSegmentInfos.getUserData().get(SequenceNumbers.LOCAL_CHECKPOINT_KEY));
-                    updatedUserData.put(HISTORY_UUID_KEY, preExistingSegmentInfos.getUserData().get(HISTORY_UUID_KEY));
-                    updatedUserData.put(MAX_UNSAFE_AUTO_ID_TIMESTAMP_COMMIT_ID, preExistingSegmentInfos.getUserData().get(MAX_UNSAFE_AUTO_ID_TIMESTAMP_COMMIT_ID));
-
-                    // Fix: Set the next write generation to be greater than the existing max segment generation
-                    // This prevents the "Next segment name counter is not greater than max segment name" error
-                    long nextGeneration = Math.max(preExistingSegmentInfos.getGeneration() + 1, segmentInfos.getGeneration() + 1);
-                    // Ensure we have a positive generation number
-                    nextGeneration = Math.max(nextGeneration, 1);
-                    //segmentInfos.setNextWriteGeneration(nextGeneration);
-                    logger.info("Set next write generation to: {}", nextGeneration);
-
-                    segmentInfos.setUserData(updatedUserData, false);
-                    try (final IndexOutput out = indexDataDirectory.createOutput(file, IOContext.DEFAULT)) {
-                        segmentInfos.write(out);
-                    }
-                } else {
-                    logger.info("Importing Lucene index file: {}, to: {}", file, indexDataDirectory);
-                    indexDataDirectory.copyFrom(luceneIndexDirectory, file, file, IOContext.DEFAULT);
-                }
-
-            }
-            // write the segmentInfos file with the correct user data (e.g. translogUUID)
-
-            //SegmentCommitInfo segmentCommitInfo = segmentInfos.get().info(0);
-
-            //segmentInfos.get().commit(indexDataDirectory);
-            /*
-            try (final IndexOutput out = indexDataDirectory.createOutput(file, IOContext.DEFAULT)) {
-                segmentInfos.write(out);
-            }*/
-
+    public void importLuceneIndex(Path luceneIndexPath) throws IOException {
+        // Create RestHighLevelClient
+        final RestClient restClient = getRestClient();
+        final RestClientBuilder restClientBuilder = restClient.builder(restClient.getNodes().getFirst());
+        // Trim leading and trailing brackets if they exist
+        String cleanDataPath = getNodeSettings().get("path.data", "data");
+        if (cleanDataPath.startsWith("[") && cleanDataPath.endsWith("]")) {
+            cleanDataPath = cleanDataPath.substring(1, cleanDataPath.length() - 1);
         }
-        logger.info("Successfully imported Lucene index files into OpenSearch index data directory");
+        final String dataPath = cleanDataPath;
 
-        // After copying files, we need to trigger a recovery to make OpenSearch recognize the new files
-        
-        // Then open it again to trigger recovery from disk
-        client().admin().indices().prepareOpen(INDEX_NAME).get();
-        logger.info("Opened index to trigger recovery from disk");
-        
-        // Wait for yellow status at minimum to ensure the recovery is complete
-        client().admin().cluster().prepareHealth(INDEX_NAME)
-            .setWaitForYellowStatus()
-            .setTimeout(TimeValue.timeValueMinutes(1))
-            .get();
-        logger.info("Index recovery completed");
-        
-        // Now refresh to make sure all segments are visible
-        client().admin().indices().prepareRefresh(INDEX_NAME).get();
-        
-        logger.info("Successfully imported Lucene index into OpenSearch");
+        try (RestHighLevelClient highLevelClient = new RestHighLevelClient(restClientBuilder)) {
+            IndexImporter indexImporter = new IndexImporter(highLevelClient, INDEX_NAME, dataPath);
+            indexImporter.importLuceneIndex(luceneIndexPath);
+        }
     }
+
 
     private void verifyImportedIndex(int expectedDocCount) throws IOException {
         // Refresh the index to ensure all documents are visible
