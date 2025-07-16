@@ -122,6 +122,7 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         try {
             // Step 3: Create the OpenSearch index with appropriate settings first
             createOpenSearchIndex();
+            ensureGreen(INDEX_NAME);
 
             // Step 4: Get the existing segment generation to avoid conflicts
             ShardRouting shardRouting = internalCluster().clusterService().state().routingTable().allShards(INDEX_NAME).get(0);
