@@ -135,7 +135,7 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
 
             // Step 6: Import the Lucene index into OpenSearch
             importLuceneIndex(tempIndexDir);
-            
+            ensureGreen(INDEX_NAME);
             // Step 6: Verify the index was imported correctly
             verifyImportedIndex(numVectors);
             
@@ -144,7 +144,7 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
             
             // Step 8: Test search functionality
             testSearchFunctionality(k, vectors, vectorSimilarityFunction);
-            
+            logger.info("Successfully completed search tests");
         } finally {
             // Clean up temporary directory
             Files.walk(tempIndexDir)
