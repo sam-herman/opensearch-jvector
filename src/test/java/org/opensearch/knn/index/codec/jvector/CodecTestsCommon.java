@@ -31,7 +31,7 @@ public class CodecTestsCommon {
     public static final String TEST_ID_FIELD = "id";
 
     public static float calculateRecallFromSource(IndexReader reader, Set<Integer> groundTruthVectorsIds, TopDocs topDocs, int k)
-            throws IOException {
+        throws IOException {
         final ScoreDoc[] scoreDocs = topDocs.scoreDocs;
         Assert.assertEquals(groundTruthVectorsIds.size(), scoreDocs.length);
         int totalRelevantDocs = 0;
@@ -40,9 +40,9 @@ public class CodecTestsCommon {
             // source is a json string with the following format: {"_id": 1, "test_field": [0.0, 1.0]}
             // Parse the JSON source using XContentHelper
             Tuple<? extends MediaType, Map<String, Object>> mapTuple = XContentHelper.convertToMap(
-                    BytesReference.fromByteBuffer(ByteBuffer.wrap(source.getBytes())),
-                    true,
-                    MediaTypeRegistry.JSON
+                BytesReference.fromByteBuffer(ByteBuffer.wrap(source.getBytes())),
+                true,
+                MediaTypeRegistry.JSON
             );
             Map<String, Object> sourceMap = mapTuple.v2();
 
@@ -56,12 +56,14 @@ public class CodecTestsCommon {
     }
 
     public static float calculateRecallFromGlobalIdField(IndexReader reader, Set<Integer> groundTruthVectorsIds, TopDocs topDocs, int k)
-            throws IOException {
+        throws IOException {
         final ScoreDoc[] scoreDocs = topDocs.scoreDocs;
         Assert.assertEquals(groundTruthVectorsIds.size(), scoreDocs.length);
         int totalRelevantDocs = 0;
         for (ScoreDoc scoreDoc : scoreDocs) {
-            final String decodeId = Uid.decodeId(reader.storedFields().document(scoreDoc.doc).getField("_id").storedValue().getBinaryValue().bytes);
+            final String decodeId = Uid.decodeId(
+                reader.storedFields().document(scoreDoc.doc).getField("_id").storedValue().getBinaryValue().bytes
+            );
             final int id = Integer.valueOf(decodeId, 10);
             if (groundTruthVectorsIds.contains(id)) {
                 totalRelevantDocs++;
@@ -71,7 +73,7 @@ public class CodecTestsCommon {
     }
 
     public static float calculateRecall(IndexReader reader, Set<Integer> groundTruthVectorsIds, String field, TopDocs topDocs, int k)
-            throws IOException {
+        throws IOException {
         final ScoreDoc[] scoreDocs = topDocs.scoreDocs;
         Assert.assertEquals(groundTruthVectorsIds.size(), scoreDocs.length);
         int totalRelevantDocs = 0;
@@ -92,10 +94,10 @@ public class CodecTestsCommon {
      * @return the IDs of the ground truth vectors in the dataset
      */
     public static Set<Integer> calculateGroundTruthVectorsIds(
-            float[] query,
-            final float[][] dataset,
-            int k,
-            VectorSimilarityFunction vectorSimilarityFunction
+        float[] query,
+        final float[][] dataset,
+        int k,
+        VectorSimilarityFunction vectorSimilarityFunction
     ) {
         final Set<Integer> groundTruthVectorsIds = new HashSet<>();
         final PriorityQueue<ScoreDoc> priorityQueue = new PriorityQueue<>(k, (o1, o2) -> Float.compare(o1.score, o2.score));
@@ -124,21 +126,21 @@ public class CodecTestsCommon {
     }
 
     public static JVectorKnnFloatVectorQuery getJVectorKnnFloatVectorQuery(
-            String fieldName,
-            float[] target,
-            int k,
-            Query filterQuery,
-            int overQueryFactor
+        String fieldName,
+        float[] target,
+        int k,
+        Query filterQuery,
+        int overQueryFactor
     ) {
         return new JVectorKnnFloatVectorQuery(
-                fieldName,
-                target,
-                k,
-                filterQuery,
-                overQueryFactor,
-                KNNConstants.DEFAULT_QUERY_SIMILARITY_THRESHOLD.floatValue(),
-                KNNConstants.DEFAULT_QUERY_RERANK_FLOOR.floatValue(),
-                KNNConstants.DEFAULT_QUERY_USE_PRUNING
+            fieldName,
+            target,
+            k,
+            filterQuery,
+            overQueryFactor,
+            KNNConstants.DEFAULT_QUERY_SIMILARITY_THRESHOLD.floatValue(),
+            KNNConstants.DEFAULT_QUERY_RERANK_FLOOR.floatValue(),
+            KNNConstants.DEFAULT_QUERY_USE_PRUNING
         );
     }
 }

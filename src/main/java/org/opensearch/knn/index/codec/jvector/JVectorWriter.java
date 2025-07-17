@@ -146,7 +146,15 @@ public class JVectorWriter extends KnnVectorsWriter {
             throw new UnsupportedOperationException(errorMessage);
         }
         final FlatFieldVectorsWriter<?> flatFieldVectorsWriter = flatVectorWriter.addField(fieldInfo);
-        FieldWriter<?> newField = new FieldWriter<>(fieldInfo, segmentWriteState.segmentInfo.name, flatFieldVectorsWriter, maxConn, beamWidth, degreeOverflow, alpha);
+        FieldWriter<?> newField = new FieldWriter<>(
+            fieldInfo,
+            segmentWriteState.segmentInfo.name,
+            flatFieldVectorsWriter,
+            maxConn,
+            beamWidth,
+            degreeOverflow,
+            alpha
+        );
 
         fields.add(newField);
         return newField;
@@ -162,7 +170,16 @@ public class JVectorWriter extends KnnVectorsWriter {
             log.error(errorMessage);
             throw new UnsupportedOperationException(errorMessage);
         }
-        return new FieldWriter<>(fieldInfo, segmentWriteState.segmentInfo.name, mergeFloatVector, ravv, maxConn, beamWidth, degreeOverflow, alpha);
+        return new FieldWriter<>(
+            fieldInfo,
+            segmentWriteState.segmentInfo.name,
+            mergeFloatVector,
+            ravv,
+            maxConn,
+            beamWidth,
+            degreeOverflow,
+            alpha
+        );
     }
 
     @Override
@@ -462,7 +479,16 @@ public class JVectorWriter extends KnnVectorsWriter {
         private final float alpha;
 
         // For merge fields only
-        FieldWriter(FieldInfo fieldInfo, String segmentName, FloatVectorValues mergedFloatVector, RandomAccessVectorValues ravv, int maxConn, int beamWidth, float degreeOverflow, float alpha) {
+        FieldWriter(
+            FieldInfo fieldInfo,
+            String segmentName,
+            FloatVectorValues mergedFloatVector,
+            RandomAccessVectorValues ravv,
+            int maxConn,
+            int beamWidth,
+            float degreeOverflow,
+            float alpha
+        ) {
             this.maxConn = maxConn;
             this.beamWidth = beamWidth;
             this.degreeOverflow = degreeOverflow;
@@ -475,7 +501,15 @@ public class JVectorWriter extends KnnVectorsWriter {
             this.segmentName = segmentName;
         }
 
-        FieldWriter(FieldInfo fieldInfo, String segmentName, FlatFieldVectorsWriter<T> flatFieldVectorsWriter, int maxConn, int beamWidth, float degreeOverflow, float alpha) {
+        FieldWriter(
+            FieldInfo fieldInfo,
+            String segmentName,
+            FlatFieldVectorsWriter<T> flatFieldVectorsWriter,
+            int maxConn,
+            int beamWidth,
+            float degreeOverflow,
+            float alpha
+        ) {
             /**
              * For creating a new field from a flat field vectors writer.
              */

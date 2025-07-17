@@ -6,6 +6,8 @@
 package org.opensearch.knn.index.codec.jvector;
 
 import lombok.extern.log4j.Log4j2;
+import org.apache.hc.core5.http.ParseException;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
@@ -15,21 +17,28 @@ import org.opensearch.action.admin.cluster.health.ClusterHealthRequest;
 import org.opensearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.opensearch.action.admin.indices.open.OpenIndexRequest;
 import org.opensearch.action.admin.indices.refresh.RefreshRequest;
+import org.opensearch.client.Request;
 import org.opensearch.client.RequestOptions;
+import org.opensearch.client.Response;
 import org.opensearch.client.RestHighLevelClient;
 import org.opensearch.client.indices.CloseIndexRequest;
 import org.opensearch.client.indices.GetIndexRequest;
 import org.opensearch.client.indices.GetIndexResponse;
+import org.opensearch.cluster.ClusterModule;
 import org.opensearch.cluster.health.ClusterHealthStatus;
 import org.opensearch.common.lucene.Lucene;
 import org.opensearch.common.unit.TimeValue;
+import org.opensearch.common.xcontent.LoggingDeprecationHandler;
+import org.opensearch.core.xcontent.MediaTypeRegistry;
+import org.opensearch.core.xcontent.NamedXContentRegistry;
+import org.opensearch.core.xcontent.XContent;
+import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.index.seqno.SequenceNumbers;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 import static org.opensearch.index.engine.Engine.HISTORY_UUID_KEY;
 import static org.opensearch.index.engine.Engine.MAX_UNSAFE_AUTO_ID_TIMESTAMP_COMMIT_ID;
@@ -42,15 +51,19 @@ import static org.opensearch.index.translog.Translog.TRANSLOG_UUID_KEY;
  */
 @Log4j2
 public class IndexImporter {
+    private static final NamedXContentRegistry DEFAULT_NAMED_X_CONTENT_REGISTRY = new NamedXContentRegistry(
+        ClusterModule.getNamedXWriteables()
+    );
+
     private final RestHighLevelClient client;
     private final String indexName;
     private final String dataPath;
 
-    public IndexImporter(RestHighLevelClient client, String indexName, String dataPath) {
-        log.info("Creating IndexImporter with indexName: {}, dataPath: {}", indexName, dataPath);
+    public IndexImporter(RestHighLevelClient client, String indexName) throws IOException, ParseException {
         this.client = client;
         this.indexName = indexName;
-        this.dataPath = dataPath;
+        this.dataPath = getBaseDataPathsForIndex(indexName).getFirst();
+        log.info("Created IndexImporter with indexName: {}, dataPath: {}", indexName, dataPath);
     }
 
     public void importLuceneIndex(Path luceneIndexPath) throws IOException {
@@ -63,14 +76,19 @@ public class IndexImporter {
 
         log.info("Closed index to prepare for recovery");
 
-        try (final Directory luceneIndexDirectory = FSDirectory.open(luceneIndexPath);
-             final Directory indexDataDirectory = FSDirectory.open(indexDataPath);) {
+        try (
+            final Directory luceneIndexDirectory = FSDirectory.open(luceneIndexPath);
+            final Directory indexDataDirectory = FSDirectory.open(indexDataPath);
+        ) {
             log.info("Lucene index directory: {}", luceneIndexDirectory);
             final SegmentInfos preExistingSegmentInfos = Lucene.readSegmentInfos(indexDataDirectory);
             final String[] luceneIndexFiles = luceneIndexDirectory.listAll();
             for (String file : indexDataDirectory.listAll()) {
-                log.info("Deleting existing file from OpenSearch index data directory: {}", file);
-                indexDataDirectory.deleteFile(file);
+                if (!file.contains("write.lock")) {
+                    log.info("Deleting existing file from OpenSearch index data directory: {}", file);
+                    indexDataDirectory.deleteFile(file);
+                }
+
             }
             log.info("Lucene index files to import: {}", luceneIndexFiles);
             for (String file : luceneIndexFiles) {
@@ -83,16 +101,22 @@ public class IndexImporter {
                     final Map<String, String> updatedUserData = new HashMap<>(existingUserData);
                     updatedUserData.put(TRANSLOG_UUID_KEY, preExistingSegmentInfos.getUserData().get(TRANSLOG_UUID_KEY));
                     updatedUserData.put(SequenceNumbers.MAX_SEQ_NO, preExistingSegmentInfos.getUserData().get(SequenceNumbers.MAX_SEQ_NO));
-                    updatedUserData.put(SequenceNumbers.LOCAL_CHECKPOINT_KEY, preExistingSegmentInfos.getUserData().get(SequenceNumbers.LOCAL_CHECKPOINT_KEY));
+                    updatedUserData.put(
+                        SequenceNumbers.LOCAL_CHECKPOINT_KEY,
+                        preExistingSegmentInfos.getUserData().get(SequenceNumbers.LOCAL_CHECKPOINT_KEY)
+                    );
                     updatedUserData.put(HISTORY_UUID_KEY, preExistingSegmentInfos.getUserData().get(HISTORY_UUID_KEY));
-                    updatedUserData.put(MAX_UNSAFE_AUTO_ID_TIMESTAMP_COMMIT_ID, preExistingSegmentInfos.getUserData().get(MAX_UNSAFE_AUTO_ID_TIMESTAMP_COMMIT_ID));
+                    updatedUserData.put(
+                        MAX_UNSAFE_AUTO_ID_TIMESTAMP_COMMIT_ID,
+                        preExistingSegmentInfos.getUserData().get(MAX_UNSAFE_AUTO_ID_TIMESTAMP_COMMIT_ID)
+                    );
 
                     // Fix: Set the next write generation to be greater than the existing max segment generation
                     // This prevents the "Next segment name counter is not greater than max segment name" error
                     long nextGeneration = Math.max(preExistingSegmentInfos.getGeneration() + 1, segmentInfos.getGeneration() + 1);
                     // Ensure we have a positive generation number
                     nextGeneration = Math.max(nextGeneration, 1);
-                    //segmentInfos.setNextWriteGeneration(nextGeneration);
+                    // segmentInfos.setNextWriteGeneration(segmentInfos.getLastGeneration() + 1);
                     log.info("Set next write generation to: {}", nextGeneration);
 
                     segmentInfos.setUserData(updatedUserData, false);
@@ -129,13 +153,12 @@ public class IndexImporter {
         RefreshRequest refreshRequest = new RefreshRequest(indexName);
         client.indices().refresh(refreshRequest, RequestOptions.DEFAULT);
 
-
         log.info("Successfully imported Lucene index into OpenSearch");
     }
 
     private Path getOpenSearchIndexDataDirectory() throws IOException {
         // Construct the path: {data_path}/nodes/0/indices/{index_uuid}/0/index
-        Path basePath = Paths.get(dataPath, "nodes", "0", "indices");
+        Path basePath = Paths.get(dataPath, "indices");
 
         // You'll need to get the index UUID from cluster state or settings
         String indexUuid = getIndexUuid();
@@ -150,5 +173,142 @@ public class IndexImporter {
         GetIndexResponse response = client.indices().get(request, RequestOptions.DEFAULT);
 
         return response.getSettings().get(indexName).get("index.uuid");
+    }
+
+    /**
+     * Takes indexName as an argument and returns the base data path for it's primary shards
+     * @param indexName the index name
+     * @return base data path for index primary shards
+     * @throws IOException
+     */
+    private List<String> getBaseDataPathsForIndex(String indexName) throws IOException, ParseException {
+
+        Map<String, List<ShardInfo>> shardInfoMap = getIndexShardsFromStats(indexName);
+        List<String> dataPathsForIndex = shardInfoMap.values()
+            .stream()
+            .flatMap(Collection::stream)
+            .map(shardInfo -> shardInfo.dataPath)
+            .toList();
+        if (dataPathsForIndex.isEmpty()) {
+            throw new IOException("No data paths found for nodes containing shards of index: " + indexName);
+        }
+
+        return dataPathsForIndex;
+    }
+
+    private Map<String, List<ShardInfo>> getIndexShardsFromStats(String indexName) throws IOException, ParseException {
+        // Get index stats
+        Request request = new Request("GET", "/" + indexName + "/_stats?level=shards&pretty");
+        Response response = client.getLowLevelClient().performRequest(request);
+        String responseBody = EntityUtils.toString(response.getEntity());
+
+        // Parse the JSON response
+        @SuppressWarnings("unchecked")
+        Map<String, Object> responseMap = (Map<String, Object>) createParser(
+            MediaTypeRegistry.getDefaultMediaType().xContent(),
+            responseBody
+        ).map();
+
+        // Navigate to the shards section
+        @SuppressWarnings("unchecked")
+        Map<String, Object> indices = (Map<String, Object>) responseMap.get("indices");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> indexData = (Map<String, Object>) indices.get(indexName);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> shards = (Map<String, Object>) indexData.get("shards");
+
+        Map<String, List<ShardInfo>> shardInfoMap = new HashMap<>();
+
+        // Parse each shard
+        for (Map.Entry<String, Object> shardEntry : shards.entrySet()) {
+            String shardId = shardEntry.getKey();
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> shardInstances = (List<Map<String, Object>>) shardEntry.getValue();
+
+            List<ShardInfo> shardInfoList = new ArrayList<>();
+            for (Map<String, Object> shardInstance : shardInstances) {
+                ShardInfo shardInfo = parseShardInfo(shardInstance);
+                shardInfoList.add(shardInfo);
+            }
+
+            shardInfoMap.put(shardId, shardInfoList);
+        }
+
+        return shardInfoMap;
+    }
+
+    private ShardInfo parseShardInfo(Map<String, Object> shardData) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> routing = (Map<String, Object>) shardData.get("routing");
+
+        String node = (String) routing.get("node");
+        String state = (String) routing.get("state");
+        Boolean primary = (Boolean) routing.get("primary");
+        String relocatingNode = (String) routing.get("relocating_node");
+        Map<String, Object> shardPath = (Map<String, Object>) shardData.get("shard_path");
+        String dataPath = (String) shardPath.get("data_path");
+        String statePath = (String) shardPath.get("state_path");
+
+        return new ShardInfo(node, state, primary, relocatingNode, dataPath, statePath);
+    }
+
+    // Helper class to hold shard information
+    public static class ShardInfo {
+        private final String node;
+        private final String state;
+        private final boolean primary;
+        private final String relocatingNode;
+        private final String dataPath;
+        private final String statePath;
+
+        public ShardInfo(String node, String state, Boolean primary, String relocatingNode, String dataPath, String statePath) {
+            this.node = node;
+            this.state = state;
+            this.primary = primary != null ? primary : false;
+            this.relocatingNode = relocatingNode;
+            this.dataPath = dataPath;
+            this.statePath = statePath;
+        }
+
+        public String getNode() {
+            return node;
+        }
+
+        public String getState() {
+            return state;
+        }
+
+        public boolean isPrimary() {
+            return primary;
+        }
+
+        public String getRelocatingNode() {
+            return relocatingNode;
+        }
+
+        public String getDataPath() {
+            return dataPath;
+        }
+
+        public String getStatePath() {
+            return statePath;
+        }
+
+        @Override
+        public String toString() {
+            return String.format(
+                "ShardInfo{node='%s', state='%s', primary=%s, relocatingNode='%s, dataPath='%s', statePath='%s'}",
+                node,
+                state,
+                primary,
+                relocatingNode,
+                dataPath,
+                statePath
+            );
+        }
+    }
+
+    private XContentParser createParser(XContent xContent, String data) throws IOException {
+        return xContent.createParser(DEFAULT_NAMED_X_CONTENT_REGISTRY, LoggingDeprecationHandler.INSTANCE, data);
     }
 }

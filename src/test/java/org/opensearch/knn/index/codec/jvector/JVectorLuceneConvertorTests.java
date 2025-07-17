@@ -34,7 +34,6 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
     private static final String SEGMENT_NAME = "_bulk";
     private static final VectorTypeSupport VECTOR_TYPE_SUPPORT = VectorizationProvider.getInstance().getVectorTypeSupport();
 
-
     /**
      * Creates a complete Lucene segment with all necessary metadata files
      */
@@ -42,7 +41,8 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
     public void createLuceneSegment() throws IOException {
         final int numDocs = 3;
         final int dimension = 16;
-        final org.apache.lucene.index.VectorSimilarityFunction vectorSimilarityFunction = org.apache.lucene.index.VectorSimilarityFunction.EUCLIDEAN;
+        final org.apache.lucene.index.VectorSimilarityFunction vectorSimilarityFunction =
+            org.apache.lucene.index.VectorSimilarityFunction.EUCLIDEAN;
 
         final float[][] vectors = new float[numDocs][dimension];
         for (int i = 0; i < numDocs; i++) {
@@ -63,15 +63,23 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
     }
 
     // Verify the index is created properly and check recall
-    private static void testCreatedIndex(final Path indexDirectoryPath, int expectedNumDocs, final float[][] vectors, int k, org.apache.lucene.index.VectorSimilarityFunction vectorSimilarityFunction) throws IOException {
+    private static void testCreatedIndex(
+        final Path indexDirectoryPath,
+        int expectedNumDocs,
+        final float[][] vectors,
+        int k,
+        org.apache.lucene.index.VectorSimilarityFunction vectorSimilarityFunction
+    ) throws IOException {
         log.info("Attempting to re-open the Lucene index created earlier in path: {}", indexDirectoryPath);
 
         final float[] target = TestUtils.generateRandomVectors(1, vectors[0].length)[0];
         final Set<Integer> groundTruthVectorsIds = calculateGroundTruthVectorsIds(target, vectors, k, vectorSimilarityFunction);
 
-        try (Directory directory = FSDirectory.open(indexDirectoryPath);
-             IndexWriter writer = new IndexWriter(directory, newIndexWriterConfig());
-             IndexReader reader = DirectoryReader.open(writer)) {
+        try (
+            Directory directory = FSDirectory.open(indexDirectoryPath);
+            IndexWriter writer = new IndexWriter(directory, newIndexWriterConfig());
+            IndexReader reader = DirectoryReader.open(writer)
+        ) {
             log.info("Successfully opened the created Lucene index with {} documents", reader.numDocs());
 
             log.info("We should now have a single segment with {} documents", expectedNumDocs);
@@ -80,7 +88,12 @@ public class JVectorLuceneConvertorTests extends LuceneTestCase {
 
             final Query filterQuery = new MatchAllDocsQuery();
             final IndexSearcher searcher = newSearcher(reader);
-            KnnFloatVectorQuery knnFloatVectorQuery = CodecTestsCommon.getJVectorKnnFloatVectorQuery(CodecTestsCommon.TEST_FIELD, target, k, filterQuery);
+            KnnFloatVectorQuery knnFloatVectorQuery = CodecTestsCommon.getJVectorKnnFloatVectorQuery(
+                CodecTestsCommon.TEST_FIELD,
+                target,
+                k,
+                filterQuery
+            );
             TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
             assertEquals(k, topDocs.totalHits.value());
             final float recall = CodecTestsCommon.calculateRecallFromGlobalIdField(reader, groundTruthVectorsIds, topDocs, k);

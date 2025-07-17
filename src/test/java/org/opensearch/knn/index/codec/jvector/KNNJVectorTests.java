@@ -319,7 +319,8 @@ public class KNNJVectorTests extends LuceneTestCase {
 
         IndexWriterConfig indexWriterConfig = LuceneTestCase.newIndexWriterConfig();
         indexWriterConfig.setUseCompoundFile(true);
-        indexWriterConfig.setCodec(JVectorCodecUtils.getCodec(Integer.MAX_VALUE, DEFAULT_MERGE_ON_DISK)); // effectively without quantization
+        indexWriterConfig.setCodec(JVectorCodecUtils.getCodec(Integer.MAX_VALUE, DEFAULT_MERGE_ON_DISK)); // effectively without
+                                                                                                          // quantization
         indexWriterConfig.setMergePolicy(new ForceMergesOnlyMergePolicy(true));
         indexWriterConfig.setMergeScheduler(new SerialMergeScheduler());
         // We set the below parameters to make sure no permature flush will occur, this way we can have a single segment, and we can force
@@ -1143,6 +1144,5 @@ public class KNNJVectorTests extends LuceneTestCase {
         vector[vectorDimension - 1] = lastValue;
         return vector;
     }
-
 
 }

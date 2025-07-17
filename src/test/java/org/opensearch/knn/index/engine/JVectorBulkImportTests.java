@@ -6,7 +6,6 @@
 package org.opensearch.knn.index.engine;
 
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakFilters;
-import com.google.common.primitives.Floats;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
@@ -16,30 +15,19 @@ import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.apache.lucene.index.*;
-import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.store.IOContext;
-import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.util.SetOnce;
-import org.apache.lucene.util.StringHelper;
 import org.junit.After;
 import org.junit.Test;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.client.*;
-import org.opensearch.client.indices.GetIndexRequest;
-import org.opensearch.client.indices.GetIndexResponse;
 import org.opensearch.cluster.routing.ShardRouting;
-import org.opensearch.common.lucene.Lucene;
 import org.opensearch.common.lucene.index.OpenSearchLeafReader;
 import org.opensearch.common.settings.Settings;
-import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.MediaTypeRegistry;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.index.engine.Engine;
 import org.opensearch.index.query.QueryBuilders;
-import org.opensearch.index.seqno.SequenceNumbers;
 import org.opensearch.index.shard.IndexShard;
 import org.opensearch.knn.KNNResult;
 import org.opensearch.knn.TestUtils;
@@ -58,20 +46,15 @@ import org.opensearch.transport.Netty4ModulePlugin;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static org.opensearch.index.engine.Engine.HISTORY_UUID_KEY;
-import static org.opensearch.index.engine.Engine.MAX_UNSAFE_AUTO_ID_TIMESTAMP_COMMIT_ID;
-import static org.opensearch.index.translog.Translog.TRANSLOG_UUID_KEY;
 import static org.opensearch.knn.common.KNNConstants.DISK_ANN;
 import static org.opensearch.knn.common.KNNConstants.KNN_ENGINE;
 import static org.opensearch.knn.common.KNNConstants.KNN_METHOD;
 import static org.opensearch.knn.common.KNNConstants.METHOD_PARAMETER_SPACE_TYPE;
 import static org.opensearch.knn.common.KNNConstants.PARAMETERS;
 import static org.opensearch.knn.common.KNNConstants.VECTOR_DATA_TYPE_FIELD;
-import static org.opensearch.knn.index.codec.jvector.CodecTestsCommon.calculateGroundTruthVectorsIds;
 import static org.opensearch.knn.index.engine.CommonTestUtils.PROPERTIES_FIELD_NAME;
 
 /**
@@ -121,7 +104,7 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         // Step 2: Create a temporary directory for the Lucene index
         Path tempIndexDir = Files.createTempDirectory("jvector-temp-index");
         logger.info("Created temporary directory for Lucene index: {}", tempIndexDir);
-        
+
         try {
             // Step 3: Create the OpenSearch index with appropriate settings first
             createOpenSearchIndex();
@@ -136,33 +119,33 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
             // Step 5: Create the Lucene index with JVector using the correct generation
             createLuceneIndex(tempIndexDir, vectors, vectorSimilarityFunction, nextGeneration);
 
+            Path expectedIndexDataPath = shard.shardPath().getDataPath();
             // Step 6: Import the Lucene index into OpenSearch
-            importLuceneIndex(tempIndexDir);
+            importLuceneIndex(tempIndexDir, expectedIndexDataPath);
             ensureGreen(INDEX_NAME);
             // Step 6: Verify the index was imported correctly
             verifyImportedIndex(numVectors);
-            
+
             // Step 7: Verify JVector engine is being used
             verifyJVectorEngineIsUsed();
-            
+
             // Step 8: Test search functionality
             testSearchFunctionality(k, vectors, vectorSimilarityFunction);
             logger.info("Successfully completed search tests");
         } finally {
             // Clean up temporary directory
-            Files.walk(tempIndexDir)
-                .sorted((a, b) -> -a.compareTo(b))
-                .forEach(path -> {
-                    try {
-                        Files.deleteIfExists(path);
-                    } catch (IOException e) {
-                        logger.warn("Failed to delete temporary file: {}", path, e);
-                    }
-                });
+            Files.walk(tempIndexDir).sorted((a, b) -> -a.compareTo(b)).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException e) {
+                    logger.warn("Failed to delete temporary file: {}", path, e);
+                }
+            });
         }
     }
 
-    private void createLuceneIndex(Path indexPath, float[][] vectors, VectorSimilarityFunction similarityFunction, long nextGeneration) throws IOException {
+    private void createLuceneIndex(Path indexPath, float[][] vectors, VectorSimilarityFunction similarityFunction, long nextGeneration)
+        throws IOException {
         logger.info("Creating Lucene index with {} vectors and generation {}", vectors.length, nextGeneration);
 
         // Convert vectors to RandomAccessVectorValues
@@ -174,14 +157,21 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         RandomAccessVectorValues randomAccessVectorValues = new ListRandomAccessVectorValues(vectorFloatList, VECTOR_DIMENSION);
 
         // Create the Lucene segment using BulkJVectorIndexGenerator with the specified generation and field name
-        BulkJVectorIndexGenerator.createLuceneSegment(indexPath, VECTOR_DIMENSION, randomAccessVectorValues, similarityFunction, nextGeneration, FIELD_NAME);
+        BulkJVectorIndexGenerator.createLuceneSegment(
+            indexPath,
+            VECTOR_DIMENSION,
+            randomAccessVectorValues,
+            similarityFunction,
+            nextGeneration,
+            FIELD_NAME
+        );
 
         logger.info("Successfully created Lucene index at {}", indexPath);
     }
 
     private void createOpenSearchIndex() throws Exception {
         logger.info("Creating OpenSearch index: {}", INDEX_NAME);
-        
+
         XContentBuilder builder = XContentFactory.jsonBuilder()
             .startObject()
             .startObject(PROPERTIES_FIELD_NAME)
@@ -201,14 +191,14 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
             .endObject()
             .endObject()
             .endObject();
-        
+
         String mapping = builder.toString();
         Settings indexSettings = Settings.builder()
             .put("index.knn", true)
             .put("index.number_of_shards", 1)
             .put("index.number_of_replicas", 0)
             .build();
-        
+
         createKnnIndex(INDEX_NAME, indexSettings, mapping);
     }
 
@@ -224,7 +214,7 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         assertEquals(request.getEndpoint() + ": failed", RestStatus.OK, RestStatus.fromCode(response.getStatusLine().getStatusCode()));
     }
 
-    public void importLuceneIndex(Path luceneIndexPath) throws IOException {
+    public void importLuceneIndex(Path luceneIndexPath, Path expectedIndexDataPath) throws IOException {
         // Create RestHighLevelClient
         final RestClient restClient = getRestClient();
         final RestClientBuilder restClientBuilder = restClient.builder(restClient.getNodes().getFirst());
@@ -234,13 +224,14 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
             cleanDataPath = cleanDataPath.substring(1, cleanDataPath.length() - 1);
         }
         final String dataPath = cleanDataPath;
-
+        logger.info("expectedDataPath: {}", dataPath, expectedIndexDataPath);
         try (RestHighLevelClient highLevelClient = new RestHighLevelClient(restClientBuilder)) {
-            IndexImporter indexImporter = new IndexImporter(highLevelClient, INDEX_NAME, dataPath);
+            IndexImporter indexImporter = new IndexImporter(highLevelClient, INDEX_NAME);
             indexImporter.importLuceneIndex(luceneIndexPath);
+        } catch (ParseException e) {
+            throw new RuntimeException(e);
         }
     }
-
 
     private void verifyImportedIndex(int expectedDocCount) throws IOException {
         // Refresh the index to ensure all documents are visible
@@ -248,12 +239,12 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
 
         var response = client().admin().indices().prepareStats(INDEX_NAME).get();
         logger.info("Index stats: {}", response);
-        //assertEquals(expectedDocCount, response.getIndices().get(INDEX_NAME).getTotal().getDocs().getCount());
+        // assertEquals(expectedDocCount, response.getIndices().get(INDEX_NAME).getTotal().getDocs().getCount());
 
         // Verify the document count
         final SearchResponse searchResponse = client().prepareSearch(INDEX_NAME).setQuery(QueryBuilders.matchAllQuery()).get();
         assertEquals(expectedDocCount, searchResponse.getHits().getTotalHits().value());
-        
+
         logger.info("Successfully verified imported index has {} documents", expectedDocCount);
     }
 
@@ -278,7 +269,7 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
                 assertTrue("JVector codec should be used", perFieldReader instanceof org.opensearch.knn.index.codec.jvector.JVectorReader);
             });
         }
-        
+
         logger.info("Successfully verified JVector engine is being used");
     }
 
@@ -291,7 +282,8 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
      * @throws IOException IOException
      * @throws ParseException ParseException
      */
-    private void testSearchFunctionality(int k, float[][] vectors, VectorSimilarityFunction vectorSimilarityFunction) throws IOException, ParseException {
+    private void testSearchFunctionality(int k, float[][] vectors, VectorSimilarityFunction vectorSimilarityFunction) throws IOException,
+        ParseException {
         // Pick a random vector to search with
         final float[] target = TestUtils.generateRandomVectors(1, vectors[0].length)[0];
 
@@ -310,8 +302,7 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
             case EUCLIDEAN -> SpaceType.L2;
             case DOT_PRODUCT -> SpaceType.INNER_PRODUCT;
             case COSINE -> SpaceType.COSINESIMIL;
-            default ->
-                    throw new IllegalArgumentException("Unsupported similarity function: " + vectorSimilarityFunction);
+            default -> throw new IllegalArgumentException("Unsupported similarity function: " + vectorSimilarityFunction);
         };
         List<Set<String>> groundTruth = TestUtils.computeGroundTruthValues(vectors, new float[][] { target }, spaceType, k);
         assertEquals(1, groundTruth.size());
@@ -325,13 +316,13 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
 
     private Response searchKNNIndex(String indexName, KNNQueryBuilder knnQueryBuilder, int size) throws IOException {
         Request request = new Request("POST", "/" + indexName + "/_search");
-        
+
         XContentBuilder builder = XContentFactory.jsonBuilder().startObject();
         builder.field("size", size);
         builder.field("query");
         knnQueryBuilder.toXContent(builder, null);
         builder.endObject();
-        
+
         request.setJsonEntity(builder.toString());
         return getRestClient().performRequest(request);
     }
@@ -341,10 +332,10 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
         Request request = new Request("GET", "/" + index + "/_mapping");
         Response response = getRestClient().performRequest(request);
         assertEquals(request.getEndpoint() + ": failed", RestStatus.OK, RestStatus.fromCode(response.getStatusLine().getStatusCode()));
-        
+
         String responseBody = EntityUtils.toString(response.getEntity());
         Map<String, Object> responseMap = createParser(MediaTypeRegistry.getDefaultMediaType().xContent(), responseBody).map();
-        
+
         return (Map<String, Object>) ((Map<String, Object>) responseMap.get(index)).get("mappings");
     }
 
@@ -354,8 +345,8 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
     protected List<KNNResult> parseSearchResponse(String responseBody, String fieldName) throws IOException {
         @SuppressWarnings("unchecked")
         List<Object> hits = (List<Object>) ((Map<String, Object>) createParser(
-                MediaTypeRegistry.getDefaultMediaType().xContent(),
-                responseBody
+            MediaTypeRegistry.getDefaultMediaType().xContent(),
+            responseBody
         ).map().get("hits")).get("hits");
 
         @SuppressWarnings("unchecked")
@@ -370,12 +361,8 @@ public class JVectorBulkImportTests extends OpenSearchIntegTestCase {
             // This is using the global doc id
             final String id = (String) ((Map<String, Object>) hit).get("_id");
             // The generator also recorded the id is stored in _source as "id" field
-            //final String id = (String) ((Map<String, Object>) ((Map<String, Object>) hit).get("_source")).get("id");
-            return new KNNResult(
-                    id,
-                    new float[]{},
-                    ((Double) ((Map<String, Object>) hit).get("_score")).floatValue()
-            );
+            // final String id = (String) ((Map<String, Object>) ((Map<String, Object>) hit).get("_source")).get("id");
+            return new KNNResult(id, new float[] {}, ((Double) ((Map<String, Object>) hit).get("_score")).floatValue());
         }).collect(Collectors.toList());
 
         return knnSearchResponses;
