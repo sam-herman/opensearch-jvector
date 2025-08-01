@@ -40,7 +40,6 @@ public class JVectorFormat extends KnnVectorsFormat {
     private final int beamWidth;
     private final Function<Integer, Integer> numberOfSubspacesPerVectorSupplier; // as a function of the original dimension
     private final int minBatchSizeForQuantization;
-    private final boolean mergeOnDisk;
     private final float alpha;
     private final float neighborOverflow;
 
@@ -52,12 +51,11 @@ public class JVectorFormat extends KnnVectorsFormat {
             KNNConstants.DEFAULT_NEIGHBOR_OVERFLOW_VALUE.floatValue(),
             KNNConstants.DEFAULT_ALPHA_VALUE.floatValue(),
             JVectorFormat::getDefaultNumberOfSubspacesPerVector,
-            DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION,
-            DEFAULT_MERGE_ON_DISK
+            DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION
         );
     }
 
-    public JVectorFormat(int minBatchSizeForQuantization, boolean mergeOnDisk) {
+    public JVectorFormat(int minBatchSizeForQuantization) {
         this(
             NAME,
             DEFAULT_MAX_CONN,
@@ -65,19 +63,11 @@ public class JVectorFormat extends KnnVectorsFormat {
             KNNConstants.DEFAULT_NEIGHBOR_OVERFLOW_VALUE.floatValue(),
             KNNConstants.DEFAULT_ALPHA_VALUE.floatValue(),
             JVectorFormat::getDefaultNumberOfSubspacesPerVector,
-            minBatchSizeForQuantization,
-            mergeOnDisk
+            minBatchSizeForQuantization
         );
     }
 
-    public JVectorFormat(
-        int maxConn,
-        int beamWidth,
-        float neighborOverflow,
-        float alpha,
-        int minBatchSizeForQuantization,
-        boolean mergeOnDisk
-    ) {
+    public JVectorFormat(int maxConn, int beamWidth, float neighborOverflow, float alpha, int minBatchSizeForQuantization) {
         this(
             NAME,
             maxConn,
@@ -85,8 +75,7 @@ public class JVectorFormat extends KnnVectorsFormat {
             neighborOverflow,
             alpha,
             JVectorFormat::getDefaultNumberOfSubspacesPerVector,
-            minBatchSizeForQuantization,
-            mergeOnDisk
+            minBatchSizeForQuantization
         );
     }
 
@@ -97,15 +86,13 @@ public class JVectorFormat extends KnnVectorsFormat {
         float neighborOverflow,
         float alpha,
         Function<Integer, Integer> numberOfSubspacesPerVectorSupplier,
-        int minBatchSizeForQuantization,
-        boolean mergeOnDisk
+        int minBatchSizeForQuantization
     ) {
         super(name);
         this.maxConn = maxConn;
         this.beamWidth = beamWidth;
         this.numberOfSubspacesPerVectorSupplier = numberOfSubspacesPerVectorSupplier;
         this.minBatchSizeForQuantization = minBatchSizeForQuantization;
-        this.mergeOnDisk = mergeOnDisk;
         this.alpha = alpha;
         this.neighborOverflow = neighborOverflow;
     }
@@ -119,14 +106,13 @@ public class JVectorFormat extends KnnVectorsFormat {
             neighborOverflow,
             alpha,
             numberOfSubspacesPerVectorSupplier,
-            minBatchSizeForQuantization,
-            mergeOnDisk
+            minBatchSizeForQuantization
         );
     }
 
     @Override
     public KnnVectorsReader fieldsReader(SegmentReadState state) throws IOException {
-        return new JVectorReader(state, mergeOnDisk);
+        return new JVectorReader(state);
     }
 
     @Override

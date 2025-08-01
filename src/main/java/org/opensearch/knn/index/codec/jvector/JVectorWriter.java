@@ -73,7 +73,6 @@ public class JVectorWriter extends KnnVectorsWriter {
     private final Function<Integer, Integer> numberOfSubspacesPerVectorSupplier; // Number of subspaces used per vector for PQ quantization
                                                                                  // as a function of the original dimension
     private final int minimumBatchSizeForQuantization; // Threshold for the vector count above which we will trigger PQ quantization
-    private final boolean mergeOnDisk;
 
     private boolean finished = false;
 
@@ -84,8 +83,7 @@ public class JVectorWriter extends KnnVectorsWriter {
         float degreeOverflow,
         float alpha,
         Function<Integer, Integer> numberOfSubspacesPerVectorSupplier,
-        int minimumBatchSizeForQuantization,
-        boolean mergeOnDisk
+        int minimumBatchSizeForQuantization
     ) throws IOException {
         this.segmentWriteState = segmentWriteState;
         this.maxConn = maxConn;
@@ -94,7 +92,6 @@ public class JVectorWriter extends KnnVectorsWriter {
         this.alpha = alpha;
         this.numberOfSubspacesPerVectorSupplier = numberOfSubspacesPerVectorSupplier;
         this.minimumBatchSizeForQuantization = minimumBatchSizeForQuantization;
-        this.mergeOnDisk = mergeOnDisk;
         this.flatVectorWriter = FLAT_VECTORS_FORMAT.fieldsWriter(segmentWriteState);
         String metaFileName = IndexFileNames.segmentFileName(
             segmentWriteState.segmentInfo.name,
@@ -165,23 +162,9 @@ public class JVectorWriter extends KnnVectorsWriter {
                 case BYTE:
                     throw new UnsupportedEncodingException("Byte vectors are not supported in JVector.");
                 case FLOAT32:
-                    final FieldWriter<float[]> floatVectorFieldWriter;
                     FloatVectorValues mergeFloatVector = MergedVectorValues.mergeFloatVectorValues(fieldInfo, mergeState);
-                    if (mergeOnDisk) {
-                        final var mergeRavv = new RandomAccessMergedFloatVectorValues(fieldInfo, mergeState, mergeFloatVector);
-                        mergeRavv.merge();
-                    } else {
-                        floatVectorFieldWriter = (FieldWriter<float[]>) addField(fieldInfo);
-                        var itr = mergeFloatVector.iterator();
-                        final List<Integer> docIds = new ArrayList<>(mergeFloatVector.size());
-                        for (int doc = itr.nextDoc(); doc != DocIdSetIterator.NO_MORE_DOCS; doc = itr.nextDoc()) {
-                            floatVectorFieldWriter.addValue(doc, mergeFloatVector.vectorValue(doc));
-                            docIds.add(doc);
-                        }
-                        final PQVectors pqVectors = getPQVectors(floatVectorFieldWriter.randomAccessVectorValues, fieldInfo);
-
-                        writeField(fieldInfo, floatVectorFieldWriter.randomAccessVectorValues, docIds, pqVectors);
-                    }
+                    final var mergeRavv = new RandomAccessMergedFloatVectorValues(fieldInfo, mergeState, mergeFloatVector);
+                    mergeRavv.merge();
                     break;
             }
             final long mergeEnd = Clock.systemDefaultZone().millis();

@@ -55,11 +55,9 @@ public class JVectorReader extends KnnVectorsReader {
     private final Directory directory;
     private final SegmentReadState state;
     private final FlatVectorsReader flatVectorsReader;
-    private final boolean mergeOnDisk;
 
-    public JVectorReader(SegmentReadState state, boolean mergeOnDisk) throws IOException {
+    public JVectorReader(SegmentReadState state) throws IOException {
         this.state = state;
-        this.mergeOnDisk = mergeOnDisk;
         this.flatVectorsReader = FLAT_VECTORS_FORMAT.fieldsReader(state);
         this.fieldInfos = state.fieldInfos;
         this.baseDataFileName = state.segmentInfo.name + "_" + state.segmentSuffix;
@@ -102,11 +100,10 @@ public class JVectorReader extends KnnVectorsReader {
 
     @Override
     public FloatVectorValues getFloatVectorValues(String field) throws IOException {
-        if (mergeOnDisk) {
-            return flatVectorsReader.getFloatVectorValues(field);
-        }
-        final FieldEntry fieldEntry = fieldEntryMap.get(field);
-        return new JVectorFloatVectorValues(fieldEntry.index, fieldEntry.similarityFunction);
+        return flatVectorsReader.getFloatVectorValues(field);
+
+        // final FieldEntry fieldEntry = fieldEntryMap.get(field);
+        // return new JVectorFloatVectorValues(fieldEntry.index, fieldEntry.similarityFunction);
     }
 
     @Override
