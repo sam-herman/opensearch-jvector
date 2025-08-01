@@ -8,6 +8,7 @@ package org.opensearch.knn.index.codec.jvector;
 import io.github.jbellis.jvector.disk.ReaderSupplier;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.SearchResult;
+import io.github.jbellis.jvector.graph.disk.NeighborsScoreCache;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
 import io.github.jbellis.jvector.graph.similarity.ScoreFunction;
@@ -123,6 +124,11 @@ public class JVectorReader extends KnnVectorsReader {
         return Optional.of(fieldEntry.pqVectors.getCompressor());
     }
 
+    public NeighborsScoreCache getNeighborsScoreCacheForField(String field) throws IOException {
+        final FieldEntry fieldEntry = fieldEntryMap.get(field);
+        return new NeighborsScoreCache(fieldEntry.neighborsScoreCacheIndexReaderSupplier.get());
+    }
+
     @Override
     public void search(String field, float[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
         final OnDiskGraphIndex index = fieldEntryMap.get(field).index;
@@ -234,8 +240,11 @@ public class JVectorReader extends KnnVectorsReader {
         private final long pqCodebooksAndVectorsLength;
         private final long pqCodebooksAndVectorsOffset;
         private final String vectorIndexFieldDataFileName;
+        private final String neighborsScoreCacheIndexFieldFileName;
+
         private final ReaderSupplier indexReaderSupplier;
         private final ReaderSupplier pqCodebooksReaderSupplier;
+        private final ReaderSupplier neighborsScoreCacheIndexReaderSupplier;
         private final OnDiskGraphIndex index;
         private final PQVectors pqVectors; // The product quantized vectors with their codebooks
 
@@ -252,6 +261,7 @@ public class JVectorReader extends KnnVectorsReader {
             this.dimension = vectorIndexFieldMetadata.getVectorDimension();
 
             this.vectorIndexFieldDataFileName = baseDataFileName + "_" + fieldInfo.name + "." + JVectorFormat.VECTOR_INDEX_EXTENSION;
+            this.neighborsScoreCacheIndexFieldFileName = baseDataFileName + "_" + fieldInfo.name + "." + JVectorFormat.NEIGHBORS_SCORE_CACHE_EXTENSION;
 
             // For the slice we would like to include the Lucene header, unfortunately, we have to do this because jVector use global
             // offsets instead of local offsets
@@ -290,6 +300,12 @@ public class JVectorReader extends KnnVectorsReader {
                 this.pqCodebooksReaderSupplier = null;
                 this.pqVectors = null;
             }
+
+            final IndexInput indexInput = directory.openInput(neighborsScoreCacheIndexFieldFileName,
+                    state.context);
+            CodecUtil.readIndexHeader(indexInput);
+
+            this.neighborsScoreCacheIndexReaderSupplier = new JVectorRandomAccessReader.Supplier(indexInput);
         }
 
         @Override
@@ -299,6 +315,9 @@ public class JVectorReader extends KnnVectorsReader {
             }
             if (pqCodebooksReaderSupplier != null) {
                 IOUtils.close(pqCodebooksReaderSupplier::close);
+            }
+            if (neighborsScoreCacheIndexReaderSupplier != null) {
+                IOUtils.close(neighborsScoreCacheIndexReaderSupplier::close);
             }
         }
     }

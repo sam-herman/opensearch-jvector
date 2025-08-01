@@ -258,6 +258,25 @@ public class JVectorWriter extends KnnVectorsWriter {
         final var vectorIndexFieldMetadata = writeGraph(graph, randomAccessVectorValues, fieldInfo, pqVectors);
         meta.writeInt(fieldInfo.number);
         vectorIndexFieldMetadata.toOutput(meta);
+
+        log.info("Writing neighbors score cache for field {}", fieldInfo.name);
+        NeighborsScoreCache neighborsScoreCache = new NeighborsScoreCache(graph);
+        // field data file, which contains the graph
+        final String neighborsScoreCacheIndexFieldFileName = baseDataFileName + "_" + fieldInfo.name + "." + JVectorFormat.NEIGHBORS_SCORE_CACHE_EXTENSION;
+        try (
+                IndexOutput indexOutput = segmentWriteState.directory.createOutput(neighborsScoreCacheIndexFieldFileName, segmentWriteState.context);
+                final var jVectorIndexWriter = new JVectorIndexWriter(indexOutput)
+        ) {
+            CodecUtil.writeIndexHeader(
+                    indexOutput,
+                    JVectorFormat.NEIGHBORS_SCORE_CACHE_CODEC_NAME,
+                    JVectorFormat.VERSION_CURRENT,
+                    segmentWriteState.segmentInfo.getId(),
+                    segmentWriteState.segmentSuffix
+            );
+            neighborsScoreCache.write(jVectorIndexWriter);
+            CodecUtil.writeFooter(indexOutput);
+        }
     }
 
     /**
