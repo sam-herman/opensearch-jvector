@@ -32,6 +32,7 @@ import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.apache.lucene.index.*;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.store.*;
+import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.opensearch.knn.plugin.stats.KNNCounter;
@@ -582,12 +583,15 @@ public class JVectorWriter extends KnnVectorsWriter {
 
             final String fieldName = fieldInfo.name;
 
-            // Count total vectors, collect readers and identify leading reader
+            // Count total vectors, collect readers and identify leading reader, collect base ordinals to later be used to build the mapping between global ordinals and global lucene doc ids
             int totalVectorsCount = 0;
+            int totalLiveVectorsCount = 0;
             int dimension = 0;
             int tempLeadingReaderIdx = -1;
             int vectorsCountInLeadingReader = -1;
             List<KnnVectorsReader> allReaders = new ArrayList<>();
+            final MergeState.DocMap[] docMaps = mergeState.docMaps.clone();
+            final Bits[] liveDocs = mergeState.liveDocs.clone();
             final int[] baseOrds = new int[mergeState.knnVectorsReaders.length];
             for (int i = 0; i < mergeState.knnVectorsReaders.length; i++) {
                 FieldInfos fieldInfos = mergeState.fieldInfos[i];
@@ -598,12 +602,20 @@ public class JVectorWriter extends KnnVectorsWriter {
                         FloatVectorValues values = reader.getFloatVectorValues(fieldName);
                         if (values != null) {
                             allReaders.add(reader);
-                            final int vectorCountInReader = values.size();
-                            if (vectorCountInReader >= vectorsCountInLeadingReader) {
-                                vectorsCountInLeadingReader = vectorCountInReader;
+                            int vectorCountInReader = values.size();
+                            int liveVectorCountInReader = 0;
+                            KnnVectorValues.DocIndexIterator it = values.iterator();
+                            while (it.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
+                                if (liveDocs[i] == null || liveDocs[i].get(it.docID())) {
+                                    liveVectorCountInReader++;
+                                }
+                            }
+                            if (liveVectorCountInReader >= vectorsCountInLeadingReader) {
+                                vectorsCountInLeadingReader = liveVectorCountInReader;
                                 tempLeadingReaderIdx = i;
                             }
                             totalVectorsCount += vectorCountInReader;
+                            totalLiveVectorsCount += liveVectorCountInReader;
                             dimension = Math.max(dimension, values.dimension());
                         }
                     }
@@ -612,6 +624,7 @@ public class JVectorWriter extends KnnVectorsWriter {
 
 
             assert (totalVectorsCount <= totalDocsCount) : "Total number of vectors exceeds the total number of documents";
+            assert (totalLiveVectorsCount <= totalVectorsCount) : "Total number of live vectors exceeds the total number of vectors";
             assert (dimension > 0) : "No vectors found for field " + fieldName;
 
             this.size = totalVectorsCount;
@@ -619,8 +632,9 @@ public class JVectorWriter extends KnnVectorsWriter {
             for (int i = 0; i < readers.length; i++) {
                 readers[i] = allReaders.get(i);
             }
-            final MergeState.DocMap[] docMaps = mergeState.docMaps.clone();
+
             // always swap the leading reader to the first position
+            // For this part we need to make sure we also swap all the other metadata arrays that are indexed by reader index
             if (tempLeadingReaderIdx != 0) {
                 final KnnVectorsReader temp = readers[LEADING_READER_IDX];
                 readers[LEADING_READER_IDX] = readers[tempLeadingReaderIdx];
@@ -629,6 +643,10 @@ public class JVectorWriter extends KnnVectorsWriter {
                 final MergeState.DocMap tempDocMap = docMaps[LEADING_READER_IDX];
                 docMaps[LEADING_READER_IDX] = docMaps[tempLeadingReaderIdx];
                 docMaps[tempLeadingReaderIdx] = tempDocMap;
+                // swap base ords
+                final int tempBaseOrd = baseOrds[LEADING_READER_IDX];
+                baseOrds[LEADING_READER_IDX] = baseOrds[tempLeadingReaderIdx];
+                baseOrds[tempLeadingReaderIdx] = tempBaseOrd;
             }
 
             this.perReaderFloatVectorValues = new FloatVectorValues[readers.length];
@@ -947,8 +965,8 @@ public class JVectorWriter extends KnnVectorsWriter {
             if (maxDocs < ordinalsToDocIds.length) {
                 throw new IllegalStateException("Max docs " + maxDocs + " is less than the number of ordinals " + ordinalsToDocIds.length);
             }
-            if (maxDocId > ordinalsToDocIds.length * 2) {
-                log.warn("Max doc id {} is greater than 2x the number of ordinals {}, this implies a lot of deleted documents. Or that many documents are missing vectors. Wasting a lot of memory", maxDocId, ordinalsToDocIds.length);
+            if (maxDocId > ordinalsToDocIds.length) {
+                log.warn("Max doc id {} is greater than the number of ordinals {}, this implies a lot of deleted documents. Or that some documents are missing vectors. Wasting a lot of memory", maxDocId, ordinalsToDocIds.length);
             }
             this.docIdsToOrdinals = new int[maxDocs];
             Arrays.fill(this.docIdsToOrdinals, -1); // -1 means no mapping to ordinal
