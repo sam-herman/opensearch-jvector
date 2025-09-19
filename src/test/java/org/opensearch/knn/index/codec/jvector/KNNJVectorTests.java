@@ -437,16 +437,27 @@ public class KNNJVectorTests extends LuceneTestCase {
                 // (a) iterate through vectors directly
                 for (LeafReaderContext context : reader.leaves()) {
                     FloatVectorValues vectorValues = context.reader().getFloatVectorValues("vec");
-                    for (int docId = 0; docId < context.reader().maxDoc(); docId++) {
+                    final var docIdSetIterator = vectorValues.iterator(); // iterator for all the vectors with values
+                    int docId = -1;
+                    while ((docId = docIdSetIterator.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
                         final int luceneDocId = context.docBase + docId;
                         final int globalDocId = reader.storedFields()
-                            .document(luceneDocId)
-                            .getField(expectedDocIdField)
-                            .storedValue()
-                            .getIntValue();
-                        float[] vectorValue = vectorValues.vectorValue(docId);
+                                .document(luceneDocId)
+                                .getField(expectedDocIdField)
+                                .storedValue()
+                                .getIntValue();
+                        float[] vectorValue = vectorValues.vectorValue(docIdSetIterator.index());
                         float[] expectedVectorValue = sourceVectors[globalDocId];
-                        Assert.assertArrayEquals("vectors in source and index should match", expectedVectorValue, vectorValue, 0.0f);
+                        // if the vectors do not match, also look which source vector should be the right result
+                        if (!Arrays.equals(expectedVectorValue, vectorValue)) {
+                            for (int i = 0; i < sourceVectors.length; i++) {
+                                if (Arrays.equals(sourceVectors[i], vectorValue)) {
+                                    log.error("found vector with global id: {}, in docId: {}, however the actual position of the vector in source is: {}", globalDocId, luceneDocId, i);
+                                }
+                            }
+                        }
+                        Assert.assertArrayEquals("vector with global id " + globalDocId + " in source doesn't match vector value in lucene docID "
+                                + luceneDocId + " on the index", expectedVectorValue, vectorValue, 0.0f);
                     }
                 }
 
@@ -524,6 +535,13 @@ public class KNNJVectorTests extends LuceneTestCase {
         int baseDocId,
         FloatVectorValues vectorValues
     ) throws IOException {
+        // Get the ords matching the lucene doc ids so that we can later find their values in the {@link vectorValues}
+        final Map<Integer, Integer> docToOrdMap = new HashMap<>(); // docToOrd map
+        final var docIdSetIterator = vectorValues.iterator();
+        while (docIdSetIterator.nextDoc() != DocIdSetIterator.NO_MORE_DOCS) {
+            docToOrdMap.put(docIdSetIterator.docID() + baseDocId, docIdSetIterator.index());
+        }
+
         for (int resultIdx = 0; resultIdx < topDocs.scoreDocs.length; resultIdx++) {
             final int localDocId = topDocs.scoreDocs[resultIdx].doc;
             final int globalDocId = reader.storedFields().document(localDocId).getField(expectedDocIdField).storedValue().getIntValue();
@@ -531,7 +549,7 @@ public class KNNJVectorTests extends LuceneTestCase {
             // Access to float values is not thread safe
             final float[] vectorValue;
             synchronized (vectorValues) {
-                vectorValue = vectorValues.vectorValue(localDocId - baseDocId);
+                vectorValue = vectorValues.vectorValue(docToOrdMap.get(localDocId));
             }
             float[] expectedVectorValue = sourceVectors[globalDocId];
             Assert.assertArrayEquals("vectors in source and index should match", expectedVectorValue, vectorValue, 0.0f);
