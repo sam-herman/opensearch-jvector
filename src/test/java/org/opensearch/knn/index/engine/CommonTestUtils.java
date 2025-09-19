@@ -130,7 +130,7 @@ public class CommonTestUtils {
 
                     @Override
                     public KnnVectorsFormat getKnnVectorsFormatForField(String field) {
-                        return new JVectorFormat(minBatchSizeForQuantization, true);
+                        return new JVectorFormat(minBatchSizeForQuantization);
                     }
                 };
             }

@@ -190,10 +190,10 @@ public class KNNJVectorTests extends LuceneTestCase {
         try (FSDirectory dir = FSDirectory.open(indexPath); IndexWriter w = new IndexWriter(dir, indexWriterConfig)) {
             final float[] target = new float[] { 0.0f, 0.0f };
             for (int i = 1; i < totalNumberOfDocs + 1; i++) {
-                final float[] source = new float[] { 0.0f, 1.0f / i };
+                final float[] source = new float[] { 0.0f, 1.0f * i };
                 final Document doc = new Document();
                 doc.add(new KnnFloatVectorField("test_field", source, VectorSimilarityFunction.EUCLIDEAN));
-                doc.add(new StringField("my_doc_id", Integer.toString(i, 10), Field.Store.YES));
+                doc.add(new StringField("my_doc_id", Integer.toString(totalNumberOfDocs - i + 1, 10), Field.Store.YES));
                 w.addDocument(doc);
                 w.commit(); // this creates a new segment without triggering a merge
             }
@@ -213,21 +213,21 @@ public class KNNJVectorTests extends LuceneTestCase {
                 Document doc = reader.storedFields().document(topDocs.scoreDocs[0].doc);
                 assertEquals("10", doc.get("my_doc_id"));
                 Assert.assertEquals(
-                    VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 1.0f / 10.0f }),
+                    VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 1.0f }),
                     topDocs.scoreDocs[0].score,
                     0.001f
                 );
                 doc = reader.storedFields().document(topDocs.scoreDocs[1].doc);
                 assertEquals("9", doc.get("my_doc_id"));
                 Assert.assertEquals(
-                    VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 1.0f / 9.0f }),
+                    VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 2.0f }),
                     topDocs.scoreDocs[1].score,
                     0.001f
                 );
                 doc = reader.storedFields().document(topDocs.scoreDocs[2].doc);
                 assertEquals("8", doc.get("my_doc_id"));
                 Assert.assertEquals(
-                    VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 1.0f / 8.0f }),
+                    VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 3.0f }),
                     topDocs.scoreDocs[2].score,
                     0.001f
                 );

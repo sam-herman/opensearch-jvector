@@ -8,6 +8,7 @@ package org.opensearch.knn.index.codec.jvector;
 import io.github.jbellis.jvector.disk.RandomAccessReader;
 import io.github.jbellis.jvector.disk.ReaderSupplier;
 import lombok.extern.log4j.Log4j2;
+import org.apache.lucene.codecs.CodecUtil;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.util.IOUtils;
 
@@ -135,6 +136,10 @@ public class JVectorRandomAccessReader implements RandomAccessReader {
         private final long sliceStartOffset;
         private final long sliceLength;
         private final ConcurrentHashMap<Integer, RandomAccessReader> readers = new ConcurrentHashMap<>();
+
+        public Supplier(IndexInput indexInput) throws IOException {
+            this(indexInput, indexInput.getFilePointer(), indexInput.length());
+        }
 
         public Supplier(IndexInput indexInput, long sliceStartOffset, long sliceLength) throws IOException {
             this.currentInput = indexInput;

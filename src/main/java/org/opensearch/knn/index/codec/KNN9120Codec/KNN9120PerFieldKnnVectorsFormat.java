@@ -67,8 +67,7 @@ public class KNN9120PerFieldKnnVectorsFormat extends BasePerFieldKnnVectorsForma
                             knnVectorsFormatParams.getAlpha(),
                             knnVectorsFormatParams.getNeighborOverflow(),
                             knnVectorsFormatParams.getNumberOfSubspacesPerVectorSupplier(),
-                            JVectorFormat.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION,
-                            true
+                            JVectorFormat.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION
                         );
                     default:
                         throw new IllegalArgumentException("Unsupported java engine: " + knnEngine);

@@ -23,12 +23,14 @@ public class JVectorFloatVectorValues extends FloatVectorValues {
     private final VectorSimilarityFunction similarityFunction;
     private final int dimension;
     private final int size;
+    private final JVectorWriter.JVectorLuceneDocMap jVectorLuceneDocMap;
 
-    public JVectorFloatVectorValues(OnDiskGraphIndex onDiskGraphIndex, VectorSimilarityFunction similarityFunction) throws IOException {
+    public JVectorFloatVectorValues(OnDiskGraphIndex onDiskGraphIndex, VectorSimilarityFunction similarityFunction, JVectorWriter.JVectorLuceneDocMap jVectorLuceneDocMap) throws IOException {
         this.dimension = onDiskGraphIndex.getDimension();
         this.size = onDiskGraphIndex.size();
         this.view = onDiskGraphIndex.getView();
         this.similarityFunction = similarityFunction;
+        this.jVectorLuceneDocMap = jVectorLuceneDocMap;
     }
 
     @Override
@@ -57,7 +59,7 @@ public class JVectorFloatVectorValues extends FloatVectorValues {
 
             @Override
             public int index() {
-                return docId;
+                return jVectorLuceneDocMap.getJVectorOrdinal(docId);
             }
 
             @Override
