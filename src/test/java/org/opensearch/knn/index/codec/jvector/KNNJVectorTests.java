@@ -1036,7 +1036,7 @@ public class KNNJVectorTests extends LuceneTestCase {
                                                              // is triggered, and we have a batch size of {@link
                                                              // MINIMUM_BATCH_SIZE_FOR_QUANTIZATION} as a result of merging all the smaller
                                                              // batches
-
+        final VectorSimilarityFunction vectorSimilarityFunction = VectorSimilarityFunction.EUCLIDEAN;
         IndexWriterConfig indexWriterConfig = LuceneTestCase.newIndexWriterConfig();
         indexWriterConfig.setUseCompoundFile(false);
         indexWriterConfig.setCodec(getCodec(DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION));
@@ -1050,11 +1050,13 @@ public class KNNJVectorTests extends LuceneTestCase {
         log.info("Index path: {}", indexPath);
         try (FSDirectory dir = FSDirectory.open(indexPath); IndexWriter w = new IndexWriter(dir, indexWriterConfig)) {
             final float[] target = generateZerosVectorWithLastValue(dimension, 0);
-            final float[][] vectors = getMonotonicallyIncreasingVectors(totalNumberOfDocs, dimension);
-            for (int i = 1; i < totalNumberOfDocs + 1; i++) {
-                final float[] source = vectors[i - 1];
+            final float[][] vectors = TestUtils.generateRandomVectors(totalNumberOfDocs, dimension);
+            final Set<Integer> groundTruthVectorsIds = calculateGroundTruthVectorsIds(target, vectors, k, vectorSimilarityFunction);
+            for (int i = 0; i < totalNumberOfDocs; i++) {
+                final float[] source = vectors[i];
                 final Document doc = new Document();
-                doc.add(new KnnFloatVectorField("test_field", source, VectorSimilarityFunction.EUCLIDEAN));
+                doc.add(new KnnFloatVectorField("test_field", source, vectorSimilarityFunction));
+                doc.add(new IntField(TEST_ID_FIELD, i, Field.Store.YES));
                 w.addDocument(doc);
                 if (i % notIdealBatchSize == 0) {
                     w.commit();
@@ -1073,11 +1075,7 @@ public class KNNJVectorTests extends LuceneTestCase {
                 KnnFloatVectorQuery knnFloatVectorQuery = getJVectorKnnFloatVectorQuery("test_field", target, k, filterQuery);
                 TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
                 assertEquals(k, topDocs.totalHits.value());
-                float expectedMinScoreInTopK = VectorSimilarityFunction.EUCLIDEAN.compare(
-                    target,
-                    new float[] { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, k }
-                );
-                final float recall = calculateRecall(topDocs, expectedMinScoreInTopK);
+                final float recall = calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
                 Assert.assertEquals(1.0f, recall, 0.05f);
                 log.info("successfully completed search tests");
             }
