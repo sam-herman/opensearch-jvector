@@ -146,21 +146,21 @@ public class KNNJVectorTests extends LuceneTestCase {
                 assertEquals(k, topDocs.totalHits.value());
                 assertEquals(0, topDocs.scoreDocs[0].doc);
                 Assert.assertEquals(
-                        VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 0.0f }),
-                        topDocs.scoreDocs[0].score,
-                        0.001f
+                    VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 0.0f }),
+                    topDocs.scoreDocs[0].score,
+                    0.001f
                 );
                 assertEquals(2, topDocs.scoreDocs[1].doc);
                 Assert.assertEquals(
-                        VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 2.0f }),
-                        topDocs.scoreDocs[1].score,
-                        0.001f
+                    VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 2.0f }),
+                    topDocs.scoreDocs[1].score,
+                    0.001f
                 );
                 assertEquals(4, topDocs.scoreDocs[2].doc);
                 Assert.assertEquals(
-                        VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 4.0f}),
-                        topDocs.scoreDocs[2].score,
-                        0.001f
+                    VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 4.0f }),
+                    topDocs.scoreDocs[2].score,
+                    0.001f
                 );
                 log.info("successfully completed search tests");
             }
@@ -184,7 +184,7 @@ public class KNNJVectorTests extends LuceneTestCase {
         indexWriterConfig.setMergePolicy(new ForceMergesOnlyMergePolicy());
         // Add index sorting configuration
         indexWriterConfig.setIndexSort(new Sort(new SortField(sortFieldName, SortField.Type.INT, true))); // true = reverse order
-        
+
         final Path indexPath = createTempDir();
         log.info("Index path: {}", indexPath);
         try (FSDirectory dir = FSDirectory.open(indexPath); IndexWriter w = new IndexWriter(dir, indexWriterConfig)) {
@@ -214,29 +214,30 @@ public class KNNJVectorTests extends LuceneTestCase {
                 assertEquals(9, topDocs.scoreDocs[0].doc);
                 assertEquals(0, reader.storedFields().document(topDocs.scoreDocs[0].doc).getField(TEST_ID_FIELD).numericValue().intValue());
                 Assert.assertEquals(
-                        VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 0.0f }),
-                        topDocs.scoreDocs[0].score,
-                        0.001f
+                    VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 0.0f }),
+                    topDocs.scoreDocs[0].score,
+                    0.001f
                 );
                 assertEquals(8, topDocs.scoreDocs[1].doc);
                 assertEquals(1, reader.storedFields().document(topDocs.scoreDocs[1].doc).getField(TEST_ID_FIELD).numericValue().intValue());
                 Assert.assertEquals(
-                        VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 1.0f }),
-                        topDocs.scoreDocs[1].score,
-                        0.001f
+                    VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 1.0f }),
+                    topDocs.scoreDocs[1].score,
+                    0.001f
                 );
                 assertEquals(7, topDocs.scoreDocs[2].doc);
                 assertEquals(2, reader.storedFields().document(topDocs.scoreDocs[2].doc).getField(TEST_ID_FIELD).numericValue().intValue());
                 Assert.assertEquals(
-                        VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 2.0f}),
-                        topDocs.scoreDocs[2].score,
-                        0.001f
+                    VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 2.0f }),
+                    topDocs.scoreDocs[2].score,
+                    0.001f
                 );
                 log.info("successfully completed search tests");
             }
         }
         log.info("successfully closed directory");
     }
+
     /**
      * Test to verify that the JVector codec is able to successfully search for the nearest neighbours
      * in the index.
@@ -1492,4 +1493,3 @@ public class KNNJVectorTests extends LuceneTestCase {
         return groundTruthVectorsIds;
     }
 }
-
