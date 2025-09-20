@@ -1330,6 +1330,7 @@ public class KNNJVectorTests extends LuceneTestCase {
                 final float[] source = vectors[i];
                 final Document doc = new Document();
                 doc.add(new IntField(TEST_ID_FIELD, i, Field.Store.YES));
+                doc.add(new KnnFloatVectorField(TEST_FIELD, source, vectorSimilarityFunction));
                 w.addDocument(doc);
                 if (i % idealBatchSize == 0) {
                     final long beforeTrainingTime = KNNCounter.KNN_QUANTIZATION_TRAINING_TIME.getCount();
