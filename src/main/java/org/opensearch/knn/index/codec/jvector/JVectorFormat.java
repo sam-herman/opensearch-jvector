@@ -77,15 +77,7 @@ public class JVectorFormat extends KnnVectorsFormat {
         Function<Integer, Integer> numberOfSubspacesPerVectorSupplier,
         int minBatchSizeForQuantization
     ) {
-        this(
-            NAME,
-            maxConn,
-            beamWidth,
-            neighborOverflow,
-            alpha,
-            numberOfSubspacesPerVectorSupplier,
-            minBatchSizeForQuantization
-        );
+        this(NAME, maxConn, beamWidth, neighborOverflow, alpha, numberOfSubspacesPerVectorSupplier, minBatchSizeForQuantization);
     }
 
     public JVectorFormat(

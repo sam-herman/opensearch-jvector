@@ -442,22 +442,35 @@ public class KNNJVectorTests extends LuceneTestCase {
                     while ((docId = docIdSetIterator.nextDoc()) != DocIdSetIterator.NO_MORE_DOCS) {
                         final int luceneDocId = context.docBase + docId;
                         final int globalDocId = reader.storedFields()
-                                .document(luceneDocId)
-                                .getField(expectedDocIdField)
-                                .storedValue()
-                                .getIntValue();
+                            .document(luceneDocId)
+                            .getField(expectedDocIdField)
+                            .storedValue()
+                            .getIntValue();
                         float[] vectorValue = vectorValues.vectorValue(docIdSetIterator.index());
                         float[] expectedVectorValue = sourceVectors[globalDocId];
                         // if the vectors do not match, also look which source vector should be the right result
                         if (!Arrays.equals(expectedVectorValue, vectorValue)) {
                             for (int i = 0; i < sourceVectors.length; i++) {
                                 if (Arrays.equals(sourceVectors[i], vectorValue)) {
-                                    log.error("found vector with global id: {}, in docId: {}, however the actual position of the vector in source is: {}", globalDocId, luceneDocId, i);
+                                    log.error(
+                                        "found vector with global id: {}, in docId: {}, however the actual position of the vector in source is: {}",
+                                        globalDocId,
+                                        luceneDocId,
+                                        i
+                                    );
                                 }
                             }
                         }
-                        Assert.assertArrayEquals("vector with global id " + globalDocId + " in source doesn't match vector value in lucene docID "
-                                + luceneDocId + " on the index", expectedVectorValue, vectorValue, 0.0f);
+                        Assert.assertArrayEquals(
+                            "vector with global id "
+                                + globalDocId
+                                + " in source doesn't match vector value in lucene docID "
+                                + luceneDocId
+                                + " on the index",
+                            expectedVectorValue,
+                            vectorValue,
+                            0.0f
+                        );
                     }
                 }
 

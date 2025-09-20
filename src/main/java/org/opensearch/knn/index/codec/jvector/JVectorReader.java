@@ -156,8 +156,10 @@ public class JVectorReader extends KnnVectorsReader {
             }
             final JVectorWriter.JVectorLuceneDocMap jvectorLuceneDocMap = fieldEntryMap.get(field).jVectorLuceneDocMap;
             // Convert the acceptDocs bitmap from Lucene to jVector ordinal bitmap filter
-            // Logic works as follows: if acceptDocs is null, we accept all ordinals. Otherwise, we check if the jVector ordinal has a corresponding Lucene doc ID accepted by acceptDocs filter.
-            io.github.jbellis.jvector.util.Bits compatibleBits = ord -> acceptDocs == null || acceptDocs.get(jvectorLuceneDocMap.getLuceneDocId(ord));
+            // Logic works as follows: if acceptDocs is null, we accept all ordinals. Otherwise, we check if the jVector ordinal has a
+            // corresponding Lucene doc ID accepted by acceptDocs filter.
+            io.github.jbellis.jvector.util.Bits compatibleBits = ord -> acceptDocs == null
+                || acceptDocs.get(jvectorLuceneDocMap.getLuceneDocId(ord));
 
             try (var graphSearcher = new GraphSearcher(index)) {
                 final var searchResults = graphSearcher.search(
@@ -254,7 +256,11 @@ public class JVectorReader extends KnnVectorsReader {
             this.jVectorLuceneDocMap = vectorIndexFieldMetadata.getJVectorLuceneDocMap();
 
             this.vectorIndexFieldDataFileName = baseDataFileName + "_" + fieldInfo.name + "." + JVectorFormat.VECTOR_INDEX_EXTENSION;
-            this.neighborsScoreCacheIndexFieldFileName = baseDataFileName + "_" + fieldInfo.name + "." + JVectorFormat.NEIGHBORS_SCORE_CACHE_EXTENSION;
+            this.neighborsScoreCacheIndexFieldFileName = baseDataFileName
+                + "_"
+                + fieldInfo.name
+                + "."
+                + JVectorFormat.NEIGHBORS_SCORE_CACHE_EXTENSION;
 
             // For the slice we would like to include the Lucene header, unfortunately, we have to do this because jVector use global
             // offsets instead of local offsets
@@ -294,8 +300,7 @@ public class JVectorReader extends KnnVectorsReader {
                 this.pqVectors = null;
             }
 
-            final IndexInput indexInput = directory.openInput(neighborsScoreCacheIndexFieldFileName,
-                    state.context);
+            final IndexInput indexInput = directory.openInput(neighborsScoreCacheIndexFieldFileName, state.context);
             CodecUtil.readIndexHeader(indexInput);
 
             this.neighborsScoreCacheIndexReaderSupplier = new JVectorRandomAccessReader.Supplier(indexInput);
