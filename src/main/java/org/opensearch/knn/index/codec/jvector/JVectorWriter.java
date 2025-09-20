@@ -796,7 +796,8 @@ public class JVectorWriter extends KnnVectorsWriter {
                 final long trainingTime = end - start;
                 log.info("Refined PQ codebooks for field {}, in {} millis", fieldName, trainingTime);
                 KNNCounter.KNN_QUANTIZATION_TRAINING_TIME.add(trainingTime);
-                pqVectors = leadingCompressor.encodeAll(this, SIMD_POOL);
+                //pqVectors = leadingCompressor.encodeAll(this, SIMD_POOL);
+                pqVectors = PQVectors.encodeAndBuild(leadingCompressor, newToOldOrds.length, newToOldOrds, this, SIMD_POOL);
             }
 
             writeField(fieldInfo, this, pqVectors, newToOldOrds, jVectorLuceneDocMap);
