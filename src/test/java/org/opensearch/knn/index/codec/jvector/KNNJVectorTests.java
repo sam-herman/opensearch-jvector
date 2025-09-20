@@ -108,6 +108,136 @@ public class KNNJVectorTests extends LuceneTestCase {
     }
 
     /**
+     * Test the scenario when not all documents are populated with the vector field
+     */
+    public void testMissing_fields() throws IOException {
+        final int k = 3; // The number of nearest neighbors to gather
+        final int totalNumberOfDocs = 10;
+        final VectorSimilarityFunction vectorSimilarityFunction = VectorSimilarityFunction.EUCLIDEAN;
+        IndexWriterConfig indexWriterConfig = LuceneTestCase.newIndexWriterConfig();
+        indexWriterConfig.setUseCompoundFile(false);
+        indexWriterConfig.setCodec(getCodec());
+        indexWriterConfig.setMergePolicy(new ForceMergesOnlyMergePolicy());
+        final Path indexPath = createTempDir();
+        log.info("Index path: {}", indexPath);
+        try (FSDirectory dir = FSDirectory.open(indexPath); IndexWriter w = new IndexWriter(dir, indexWriterConfig)) {
+            final float[] target = new float[] { 0.0f, 0.0f };
+            for (int i = 0; i < totalNumberOfDocs; i++) {
+                final Document doc = new Document();
+                if (i % 2 == 0) {
+                    final float[] source = new float[] { 0.0f, i };
+                    doc.add(new KnnFloatVectorField("test_field", source, vectorSimilarityFunction));
+                }
+                doc.add(new IntField(TEST_ID_FIELD, i, Field.Store.YES));
+                w.addDocument(doc);
+            }
+            log.info("Flushing docs to make them discoverable on the file system");
+            w.commit();
+
+            try (IndexReader reader = DirectoryReader.open(w)) {
+                log.info("We should now have a single segment with 10 documents");
+                Assert.assertEquals(1, reader.getContext().leaves().size());
+                Assert.assertEquals(totalNumberOfDocs, reader.numDocs());
+
+                final Query filterQuery = new MatchAllDocsQuery();
+                final IndexSearcher searcher = newSearcher(reader);
+                KnnFloatVectorQuery knnFloatVectorQuery = getJVectorKnnFloatVectorQuery("test_field", target, k, filterQuery);
+                TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
+                assertEquals(k, topDocs.totalHits.value());
+                assertEquals(0, topDocs.scoreDocs[0].doc);
+                Assert.assertEquals(
+                        VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 0.0f }),
+                        topDocs.scoreDocs[0].score,
+                        0.001f
+                );
+                assertEquals(2, topDocs.scoreDocs[1].doc);
+                Assert.assertEquals(
+                        VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 2.0f }),
+                        topDocs.scoreDocs[1].score,
+                        0.001f
+                );
+                assertEquals(4, topDocs.scoreDocs[2].doc);
+                Assert.assertEquals(
+                        VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 4.0f}),
+                        topDocs.scoreDocs[2].score,
+                        0.001f
+                );
+                log.info("successfully completed search tests");
+            }
+        }
+        log.info("successfully closed directory");
+    }
+
+    /**
+     * Test the scenario when the index is sorted by a doc value
+     * We want to make sure the docIDs are correctly mapped to the jVector ordinals
+     * @throws IOException if an I/O error occurs
+     */
+    public void test_sorted_index() throws IOException {
+        final int k = 3; // The number of nearest neighbors to gather
+        final int totalNumberOfDocs = 10;
+        final VectorSimilarityFunction vectorSimilarityFunction = VectorSimilarityFunction.EUCLIDEAN;
+        final String sortFieldName = "sorted_field";
+        IndexWriterConfig indexWriterConfig = LuceneTestCase.newIndexWriterConfig();
+        indexWriterConfig.setUseCompoundFile(false);
+        indexWriterConfig.setCodec(getCodec());
+        indexWriterConfig.setMergePolicy(new ForceMergesOnlyMergePolicy());
+        // Add index sorting configuration
+        indexWriterConfig.setIndexSort(new Sort(new SortField(sortFieldName, SortField.Type.INT, true))); // true = reverse order
+        
+        final Path indexPath = createTempDir();
+        log.info("Index path: {}", indexPath);
+        try (FSDirectory dir = FSDirectory.open(indexPath); IndexWriter w = new IndexWriter(dir, indexWriterConfig)) {
+            final float[] target = new float[] { 0.0f, 0.0f };
+            for (int i = 0; i < totalNumberOfDocs; i++) {
+                final Document doc = new Document();
+                final float[] source = new float[] { 0.0f, i };
+                doc.add(new KnnFloatVectorField("test_field", source, vectorSimilarityFunction));
+                doc.add(new IntField(TEST_ID_FIELD, i, Field.Store.YES));
+                // Add the sortable field
+                doc.add(new NumericDocValuesField(sortFieldName, i));
+                w.addDocument(doc);
+            }
+            log.info("Flushing docs to make them discoverable on the file system");
+            w.commit();
+
+            try (IndexReader reader = DirectoryReader.open(w)) {
+                log.info("We should now have a single segment with 10 documents");
+                Assert.assertEquals(1, reader.getContext().leaves().size());
+                Assert.assertEquals(totalNumberOfDocs, reader.numDocs());
+
+                final Query filterQuery = new MatchAllDocsQuery();
+                final IndexSearcher searcher = newSearcher(reader);
+                KnnFloatVectorQuery knnFloatVectorQuery = getJVectorKnnFloatVectorQuery("test_field", target, k, filterQuery);
+                TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
+                assertEquals(k, topDocs.totalHits.value());
+                assertEquals(9, topDocs.scoreDocs[0].doc);
+                assertEquals(0, reader.storedFields().document(topDocs.scoreDocs[0].doc).getField(TEST_ID_FIELD).numericValue().intValue());
+                Assert.assertEquals(
+                        VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 0.0f }),
+                        topDocs.scoreDocs[0].score,
+                        0.001f
+                );
+                assertEquals(8, topDocs.scoreDocs[1].doc);
+                assertEquals(1, reader.storedFields().document(topDocs.scoreDocs[1].doc).getField(TEST_ID_FIELD).numericValue().intValue());
+                Assert.assertEquals(
+                        VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 1.0f }),
+                        topDocs.scoreDocs[1].score,
+                        0.001f
+                );
+                assertEquals(7, topDocs.scoreDocs[2].doc);
+                assertEquals(2, reader.storedFields().document(topDocs.scoreDocs[2].doc).getField(TEST_ID_FIELD).numericValue().intValue());
+                Assert.assertEquals(
+                        VectorSimilarityFunction.EUCLIDEAN.compare(target, new float[] { 0.0f, 2.0f}),
+                        topDocs.scoreDocs[2].score,
+                        0.001f
+                );
+                log.info("successfully completed search tests");
+            }
+        }
+        log.info("successfully closed directory");
+    }
+    /**
      * Test to verify that the JVector codec is able to successfully search for the nearest neighbours
      * in the index.
      * Single field is used to store the vectors.
@@ -1198,7 +1328,6 @@ public class KNNJVectorTests extends LuceneTestCase {
             for (int i = 0; i < totalNumberOfDocs; i++) {
                 final float[] source = vectors[i];
                 final Document doc = new Document();
-                doc.add(new KnnFloatVectorField(TEST_FIELD, source, vectorSimilarityFunction));
                 doc.add(new IntField(TEST_ID_FIELD, i, Field.Store.YES));
                 w.addDocument(doc);
                 if (i % idealBatchSize == 0) {
@@ -1363,3 +1492,4 @@ public class KNNJVectorTests extends LuceneTestCase {
         return groundTruthVectorsIds;
     }
 }
+
