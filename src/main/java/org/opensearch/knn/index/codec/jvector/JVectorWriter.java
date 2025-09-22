@@ -36,7 +36,6 @@ import org.apache.lucene.store.*;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.RamUsageEstimator;
-import org.apache.lucene.util.SetOnce;
 import org.opensearch.knn.plugin.stats.KNNCounter;
 
 import java.io.IOException;
@@ -223,8 +222,9 @@ public class JVectorWriter extends KnnVectorsWriter {
                 );
                 pqVectors = null;
                 buildScoreProvider = BuildScoreProvider.randomAccessScoreProvider(
-                        randomAccessVectorValues,
-                        getVectorSimilarityFunction(fieldInfo));
+                    randomAccessVectorValues,
+                    getVectorSimilarityFunction(fieldInfo)
+                );
             }
 
             // Generate the ord to doc mapping
@@ -238,11 +238,11 @@ public class JVectorWriter extends KnnVectorsWriter {
             }
 
             OnHeapGraphIndex graph = getGraph(
-                    buildScoreProvider,
-                    randomAccessVectorValues,
-                    newToOldOrds,
-                    fieldInfo,
-                    segmentWriteState.segmentInfo.name
+                buildScoreProvider,
+                randomAccessVectorValues,
+                newToOldOrds,
+                fieldInfo,
+                segmentWriteState.segmentInfo.name
             );
             writeField(field.fieldInfo, field.randomAccessVectorValues, pqVectors, newToOldOrds, jVectorLuceneDocMap, graph);
 
@@ -821,41 +821,26 @@ public class JVectorWriter extends KnnVectorsWriter {
             }
 
             if (pqVectors == null) {
-                buildScoreProvider = BuildScoreProvider.randomAccessScoreProvider(
-                        this,
-                        getVectorSimilarityFunction(fieldInfo)
-                );
+                buildScoreProvider = BuildScoreProvider.randomAccessScoreProvider(this, getVectorSimilarityFunction(fieldInfo));
                 if (!deletesFound) {
                     log.info("No deletes found, and no PQ codebooks found, expanding previous graph with additional vectors");
 
                     graph = expandPreviousGraphWithAdditionalVectors(
-                            leadingReader,
-                            buildScoreProvider,
-                            this,
-                            newToOldOrds,
-                            fieldInfo,
-                            segmentWriteState.segmentInfo.name
-                    );
-                } else {
-                    log.info("Deletes found, and no PQ codebooks found, building new graph from scratch");
-                    graph = getGraph(
-                            buildScoreProvider,
-                            this,
-                            newToOldOrds,
-                            fieldInfo,
-                            segmentWriteState.segmentInfo.name
-                    );
-                }
-            } else {
-                log.info("PQ codebooks found, building graph from scratch with PQ vectors");
-                buildScoreProvider = BuildScoreProvider.pqBuildScoreProvider(getVectorSimilarityFunction(fieldInfo), pqVectors);
-                graph = getGraph(
+                        leadingReader,
                         buildScoreProvider,
                         this,
                         newToOldOrds,
                         fieldInfo,
                         segmentWriteState.segmentInfo.name
-                );
+                    );
+                } else {
+                    log.info("Deletes found, and no PQ codebooks found, building new graph from scratch");
+                    graph = getGraph(buildScoreProvider, this, newToOldOrds, fieldInfo, segmentWriteState.segmentInfo.name);
+                }
+            } else {
+                log.info("PQ codebooks found, building graph from scratch with PQ vectors");
+                buildScoreProvider = BuildScoreProvider.pqBuildScoreProvider(getVectorSimilarityFunction(fieldInfo), pqVectors);
+                graph = getGraph(buildScoreProvider, this, newToOldOrds, fieldInfo, segmentWriteState.segmentInfo.name);
             }
 
             writeField(fieldInfo, this, pqVectors, newToOldOrds, jVectorLuceneDocMap, graph);
@@ -952,8 +937,8 @@ public class JVectorWriter extends KnnVectorsWriter {
     }
 
     public OnHeapGraphIndex expandPreviousGraphWithAdditionalVectors(
-            JVectorReader leadingReader,
-            BuildScoreProvider buildScoreProvider,
+        JVectorReader leadingReader,
+        BuildScoreProvider buildScoreProvider,
         RandomAccessVectorValues randomAccessVectorValues,
         int[] newToOldOrds,
         FieldInfo fieldInfo,
@@ -964,23 +949,36 @@ public class JVectorWriter extends KnnVectorsWriter {
         final NeighborsScoreCache neighborsScoreCache = leadingReader.getNeighborsScoreCacheForField(fieldName);
         final int numBaseVectors = leadingReader.getFloatVectorValues(fieldName).size();
         final OnDiskGraphIndex onDiskGraphIndex = leadingReader.getOnDiskGraphIndex(fieldName);
-        return buildAndMergeNewNodes(onDiskGraphIndex, neighborsScoreCache, randomAccessVectorValues, buildScoreProvider, numBaseVectors, newToOldOrds, beamWidth, degreeOverflow, alpha, true);
+        return buildAndMergeNewNodes(
+            onDiskGraphIndex,
+            neighborsScoreCache,
+            randomAccessVectorValues,
+            buildScoreProvider,
+            numBaseVectors,
+            newToOldOrds,
+            beamWidth,
+            degreeOverflow,
+            alpha,
+            true
+        );
     }
 
-    public static OnHeapGraphIndex buildAndMergeNewNodes(OnDiskGraphIndex onDiskGraphIndex,
-                                                         NeighborsScoreCache perLevelNeighborsScoreCache,
-                                                         RandomAccessVectorValues newVectors,
-                                                         BuildScoreProvider buildScoreProvider,
-                                                         int startingNodeOffset,
-                                                         int[] newToOldOrds,
-                                                         int beamWidth,
-                                                         float overflowRatio,
-                                                         float alpha,
-                                                         boolean addHierarchy) throws IOException {
+    public static OnHeapGraphIndex buildAndMergeNewNodes(
+        OnDiskGraphIndex onDiskGraphIndex,
+        NeighborsScoreCache perLevelNeighborsScoreCache,
+        RandomAccessVectorValues newVectors,
+        BuildScoreProvider buildScoreProvider,
+        int startingNodeOffset,
+        int[] newToOldOrds,
+        int beamWidth,
+        float overflowRatio,
+        float alpha,
+        boolean addHierarchy
+    ) throws IOException {
 
-
-
-        try (GraphIndexBuilder builder = new GraphIndexBuilder(buildScoreProvider,
+        try (
+            GraphIndexBuilder builder = new GraphIndexBuilder(
+                buildScoreProvider,
                 onDiskGraphIndex,
                 perLevelNeighborsScoreCache,
                 beamWidth,
@@ -989,7 +987,9 @@ public class JVectorWriter extends KnnVectorsWriter {
                 addHierarchy,
                 true,
                 PhysicalCoreExecutor.pool(),
-                ForkJoinPool.commonPool())) {
+                ForkJoinPool.commonPool()
+            )
+        ) {
 
             // Add each new vector incrementally
             final List<ForkJoinTask<?>> forkJoinTask = new ArrayList<>(newVectors.size());
