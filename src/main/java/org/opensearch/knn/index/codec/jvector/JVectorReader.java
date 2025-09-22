@@ -117,6 +117,10 @@ public class JVectorReader extends KnnVectorsReader {
         return new NeighborsScoreCache(fieldEntry.neighborsScoreCacheIndexReaderSupplier.get());
     }
 
+    public OnDiskGraphIndex getOnDiskGraphIndex(String field) throws IOException {
+        return fieldEntryMap.get(field).index;
+    }
+
     @Override
     public void search(String field, float[] target, KnnCollector knnCollector, Bits acceptDocs) throws IOException {
         final OnDiskGraphIndex index = fieldEntryMap.get(field).index;

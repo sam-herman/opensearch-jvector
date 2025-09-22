@@ -137,7 +137,7 @@ public class JVectorRandomAccessReader implements RandomAccessReader {
         private final ConcurrentHashMap<Integer, RandomAccessReader> readers = new ConcurrentHashMap<>();
 
         public Supplier(IndexInput indexInput) throws IOException {
-            this(indexInput, indexInput.getFilePointer(), indexInput.length());
+            this(indexInput, indexInput.getFilePointer(), indexInput.length() - indexInput.getFilePointer());
         }
 
         public Supplier(IndexInput indexInput, long sliceStartOffset, long sliceLength) throws IOException {
