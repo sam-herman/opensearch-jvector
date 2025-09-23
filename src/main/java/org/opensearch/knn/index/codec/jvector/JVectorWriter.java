@@ -16,7 +16,6 @@ import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
 import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
-import io.github.jbellis.jvector.util.PhysicalCoreExecutor;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
@@ -43,7 +42,6 @@ import java.io.UnsupportedEncodingException;
 import java.time.Clock;
 import java.util.*;
 import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.ForkJoinTask;
 import java.util.function.Function;
 import java.util.stream.IntStream;
 
@@ -954,7 +952,7 @@ public class JVectorWriter extends KnnVectorsWriter {
         final NeighborsScoreCache neighborsScoreCache = leadingReader.getNeighborsScoreCacheForField(fieldName);
         final int numBaseVectors = leadingReader.getFloatVectorValues(fieldName).size();
         final OnDiskGraphIndex onDiskGraphIndex = leadingReader.getOnDiskGraphIndex(fieldName);
-        return buildAndMergeNewNodes(
+        return GraphIndexBuilder.buildAndMergeNewNodes(
             onDiskGraphIndex,
             neighborsScoreCache,
             randomAccessVectorValues,
@@ -966,52 +964,6 @@ public class JVectorWriter extends KnnVectorsWriter {
             alpha,
             true
         );
-    }
-
-    public static OnHeapGraphIndex buildAndMergeNewNodes(
-        OnDiskGraphIndex onDiskGraphIndex,
-        NeighborsScoreCache perLevelNeighborsScoreCache,
-        RandomAccessVectorValues newVectors,
-        BuildScoreProvider buildScoreProvider,
-        int startingNodeOffset,
-        int[] newToOldOrds,
-        int beamWidth,
-        float overflowRatio,
-        float alpha,
-        boolean addHierarchy
-    ) throws IOException {
-
-        try (
-            GraphIndexBuilder builder = new GraphIndexBuilder(
-                buildScoreProvider,
-                onDiskGraphIndex,
-                perLevelNeighborsScoreCache,
-                beamWidth,
-                overflowRatio,
-                alpha,
-                addHierarchy,
-                true,
-                PhysicalCoreExecutor.pool(),
-                ForkJoinPool.commonPool()
-            )
-        ) {
-
-            // Add each new vector incrementally
-            final List<ForkJoinTask<?>> forkJoinTask = new ArrayList<>(newVectors.size());
-            for (int i = startingNodeOffset; i < newVectors.size(); i++) {
-                final int nodeId = i;
-                final VectorFloat<?> vector = newVectors.getVector(newToOldOrds[nodeId]);
-
-                // The GraphIndexBuilder can add nodes to an existing index
-                forkJoinTask.add(PhysicalCoreExecutor.pool().submit(() -> builder.addGraphNode(nodeId, vector)));
-            }
-            for (ForkJoinTask<?> task : forkJoinTask) {
-                task.join();
-            }
-
-            builder.cleanup();
-            return builder.getGraph();
-        }
     }
 
     static class RandomAccessVectorValuesOverVectorValues implements RandomAccessVectorValues {
