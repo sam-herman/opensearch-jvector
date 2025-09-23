@@ -37,7 +37,6 @@ import org.opensearch.knn.TestUtils;
 
 import java.io.IOException;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static org.opensearch.knn.KNNRestTestCase.FIELD_NAME;
 import static org.opensearch.knn.KNNRestTestCase.INDEX_NAME;
@@ -438,17 +437,44 @@ public class InternalKNNEngineTests extends OpenSearchIntegTestCase {
         // Add the first small batch (below quantization threshold)
         logger.info("Adding first small batch");
         final RestClient restClient = getRestClient();
-        CommonTestUtils.bulkAddKnnDocs(restClient, INDEX_NAME, FIELD_NAME, vectors, firstSmallBatchOffset, firstSmallBatchOffset, smallBatchSize, true);
+        CommonTestUtils.bulkAddKnnDocs(
+            restClient,
+            INDEX_NAME,
+            FIELD_NAME,
+            vectors,
+            firstSmallBatchOffset,
+            firstSmallBatchOffset,
+            smallBatchSize,
+            true
+        );
         CommonTestUtils.flushIndex(restClient, INDEX_NAME);
 
         logger.info("Adding large batch");
         // Add the large batch (above quantization threshold)
-        CommonTestUtils.bulkAddKnnDocs(restClient,INDEX_NAME, FIELD_NAME, vectors, largeBatchOffset, largeBatchOffset, largeBatchSize, true);
+        CommonTestUtils.bulkAddKnnDocs(
+            restClient,
+            INDEX_NAME,
+            FIELD_NAME,
+            vectors,
+            largeBatchOffset,
+            largeBatchOffset,
+            largeBatchSize,
+            true
+        );
         CommonTestUtils.flushIndex(restClient, INDEX_NAME);
 
         logger.info("Adding second small batch");
         // Add another small batch
-        CommonTestUtils.bulkAddKnnDocs(restClient, INDEX_NAME, FIELD_NAME, vectors, secondSmallBatchOffset, secondSmallBatchOffset, smallBatchSize, true);
+        CommonTestUtils.bulkAddKnnDocs(
+            restClient,
+            INDEX_NAME,
+            FIELD_NAME,
+            vectors,
+            secondSmallBatchOffset,
+            secondSmallBatchOffset,
+            smallBatchSize,
+            true
+        );
         CommonTestUtils.flushIndex(restClient, INDEX_NAME);
 
         // Force merge to trigger quantization for all segments
@@ -531,11 +557,11 @@ public class InternalKNNEngineTests extends OpenSearchIntegTestCase {
         methodParametersWithLowOverQuery.put(METHOD_PARAMETER_RERANK_FLOOR, DEFAULT_QUERY_RERANK_FLOOR);
 
         KNNQueryBuilder knnQueryBuilder = KNNQueryBuilder.builder()
-                .k(k)
-                .vector(queryVector)
-                .fieldName(FIELD_NAME)
-                .methodParameters(methodParametersWithLowOverQuery)
-                .build();
+            .k(k)
+            .vector(queryVector)
+            .fieldName(FIELD_NAME)
+            .methodParameters(methodParametersWithLowOverQuery)
+            .build();
         Response response = CommonTestUtils.searchKNNIndex(restClient, INDEX_NAME, knnQueryBuilder, k);
         List<KNNResult> results = CommonTestUtils.parseSearchResponse(EntityUtils.toString(response.getEntity()), FIELD_NAME);
 
@@ -555,11 +581,11 @@ public class InternalKNNEngineTests extends OpenSearchIntegTestCase {
         methodParametersWithHighOverQuery.put(METHOD_PARAMETER_RERANK_FLOOR, DEFAULT_QUERY_RERANK_FLOOR);
 
         knnQueryBuilder = KNNQueryBuilder.builder()
-                .k(k)
-                .vector(queryVector)
-                .fieldName(FIELD_NAME)
-                .methodParameters(methodParametersWithHighOverQuery)
-                .build();
+            .k(k)
+            .vector(queryVector)
+            .fieldName(FIELD_NAME)
+            .methodParameters(methodParametersWithHighOverQuery)
+            .build();
         response = CommonTestUtils.searchKNNIndex(restClient, INDEX_NAME, knnQueryBuilder, k);
         results = CommonTestUtils.parseSearchResponse(EntityUtils.toString(response.getEntity()), FIELD_NAME);
 

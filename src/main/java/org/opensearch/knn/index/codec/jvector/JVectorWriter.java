@@ -758,6 +758,11 @@ public class JVectorWriter extends KnnVectorsWriter {
          * <p>
          * Also, it generates a mapping of ordinals to document IDs by iterating through
          * the provided vector data, which is further used to write the field data.
+         * <p>
+         * In the event of no deletes or quantization, the graph construction is done by incrementally adding vectors from smaller segments into the largest segment.
+         * For all other cases, we build a new graph from scratch from all the vectors.
+         *
+         * TODO: Add support for incremental graph building with quantization see <a href="https://github.com/opensearch-project/opensearch-jvector/issues/166">issue</a>
          *
          * @throws IOException if there is an issue during reading or writing vector data.
          */
@@ -945,7 +950,7 @@ public class JVectorWriter extends KnnVectorsWriter {
         String segmentName
     ) throws IOException {
         final String fieldName = fieldInfo.name;
-        log.info("Expanding previous graph with additional vectors");
+        log.info("Expanding previous graph with additional vectors for field {} in segment {}", fieldName, segmentName);
         final NeighborsScoreCache neighborsScoreCache = leadingReader.getNeighborsScoreCacheForField(fieldName);
         final int numBaseVectors = leadingReader.getFloatVectorValues(fieldName).size();
         final OnDiskGraphIndex onDiskGraphIndex = leadingReader.getOnDiskGraphIndex(fieldName);

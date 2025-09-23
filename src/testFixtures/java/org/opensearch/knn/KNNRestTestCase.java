@@ -32,7 +32,6 @@ import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.plugin.JVectorKNNPlugin;
 import org.opensearch.knn.plugin.script.KNNScoringScriptEngine;
 import org.junit.AfterClass;
-import org.junit.Before;
 import org.opensearch.client.Request;
 import org.opensearch.client.Response;
 import org.opensearch.common.settings.Settings;
@@ -1583,8 +1582,15 @@ public class KNNRestTestCase extends ODFERestTestCase {
     }
 
     // Method that adds multiple documents into the index using Bulk API
-    public void bulkAddKnnDocs(String index, String fieldName, float[][] sourceVectors, int sourceOffset, int baseDocId, int docCount, boolean refresh)
-            throws IOException {
+    public void bulkAddKnnDocs(
+        String index,
+        String fieldName,
+        float[][] sourceVectors,
+        int sourceOffset,
+        int baseDocId,
+        int docCount,
+        boolean refresh
+    ) throws IOException {
         Request request = new Request("POST", "/_bulk");
 
         request.addParameter("refresh", Boolean.toString(refresh));
@@ -1592,15 +1598,15 @@ public class KNNRestTestCase extends ODFERestTestCase {
 
         for (int i = 0; i < docCount; i++) {
             sb.append("{ \"index\" : { \"_index\" : \"")
-                    .append(index)
-                    .append("\", \"_id\" : \"")
-                    .append(baseDocId + i)
-                    .append("\" } }\n")
-                    .append("{ \"")
-                    .append(fieldName)
-                    .append("\" : ")
-                    .append(Arrays.toString(sourceVectors[sourceOffset + i]))
-                    .append(" }\n");
+                .append(index)
+                .append("\", \"_id\" : \"")
+                .append(baseDocId + i)
+                .append("\" } }\n")
+                .append("{ \"")
+                .append(fieldName)
+                .append("\" : ")
+                .append(Arrays.toString(sourceVectors[sourceOffset + i]))
+                .append(" }\n");
         }
 
         request.setJsonEntity(sb.toString());

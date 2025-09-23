@@ -5,7 +5,6 @@
 
 package org.opensearch.knn.index.engine;
 
-import org.junit.Test;
 import org.opensearch.client.*;
 
 import com.google.common.collect.ImmutableList;
@@ -25,7 +24,6 @@ import org.opensearch.knn.TestUtils;
 import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.VectorDataType;
-import org.opensearch.knn.index.codec.jvector.JVectorFormat;
 import org.opensearch.knn.index.query.KNNQueryBuilder;
 
 import java.io.IOException;
