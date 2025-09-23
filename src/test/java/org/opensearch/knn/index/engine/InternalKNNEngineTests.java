@@ -482,4 +482,93 @@ public class InternalKNNEngineTests extends OpenSearchIntegTestCase {
         float recall = ((float) results.stream().filter(r -> expectedDocIds.contains(r.getDocId())).count()) / ((float) k);
         assertTrue("Expected recall to be at least 0.9 but got " + recall, recall >= 0.9);
     }
+
+    /**
+     * Test for recall with various overquery parameters.
+     * We expect the recall to be higher the more we increase the overquery parameter
+     * @throws Exception exception
+     */
+    @Test
+    public void testQuantizationWithOverQueryParameter() throws Exception {
+        int dimension = 512;
+        final SpaceType spaceType = SpaceType.L2;
+        final RestClient restClient = getRestClient();
+        createKnnIndexMappingWithJVectorEngine(dimension, spaceType, VectorDataType.FLOAT);
+
+        // Choosing a batch size that will trigger quantization
+        int batchSize = JVectorFormat.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION * 2;
+
+        final float[][] vectors = TestUtils.generateRandomVectors(batchSize, dimension);
+        final int totalDocs = vectors.length;
+
+        logger.info("Adding batch of vectors with size {} that is expected to trigger quantization", totalDocs);
+        CommonTestUtils.bulkAddKnnDocs(restClient, INDEX_NAME, FIELD_NAME, vectors, batchSize, true);
+        CommonTestUtils.flushIndex(restClient, INDEX_NAME);
+
+        // Force merge to trigger quantization for all segments
+        logger.info("Force merging just in case quantization didn't happen because of segment fragmentation");
+        CommonTestUtils.forceMergeKnnIndex(restClient, INDEX_NAME);
+
+        // Verify the total document count
+        int expectedTotalDocs = vectors.length;
+        assertEquals(expectedTotalDocs, CommonTestUtils.getDocCount(restClient, INDEX_NAME));
+
+        // Perform search and verify recall
+        float[] queryVector = TestUtils.generateRandomVectors(1, dimension)[0];
+        int k = 10;
+
+        // Calculate ground truth with brute force
+        logger.info("Calculating ground truth");
+        List<Set<String>> groundTruth = TestUtils.computeGroundTruthValues(vectors, new float[][] { queryVector }, spaceType, k);
+        assertEquals(1, groundTruth.size());
+        Set<String> expectedDocIds = groundTruth.getFirst();
+
+        logger.info("Searching with low overquery factor");
+        // 1. Search with a low-overquery factor
+        final Map<String, Object> methodParametersWithLowOverQuery = new HashMap<>();
+        methodParametersWithLowOverQuery.put(KNNConstants.METHOD_PARAMETER_OVERQUERY_FACTOR, 1);
+        methodParametersWithLowOverQuery.put(KNNConstants.METHOD_PARAMETER_THRESHOLD, DEFAULT_QUERY_SIMILARITY_THRESHOLD);
+        methodParametersWithLowOverQuery.put(METHOD_PARAMETER_RERANK_FLOOR, DEFAULT_QUERY_RERANK_FLOOR);
+
+        KNNQueryBuilder knnQueryBuilder = KNNQueryBuilder.builder()
+                .k(k)
+                .vector(queryVector)
+                .fieldName(FIELD_NAME)
+                .methodParameters(methodParametersWithLowOverQuery)
+                .build();
+        Response response = CommonTestUtils.searchKNNIndex(restClient, INDEX_NAME, knnQueryBuilder, k);
+        List<KNNResult> results = CommonTestUtils.parseSearchResponse(EntityUtils.toString(response.getEntity()), FIELD_NAME);
+
+        // Verify we got k results (or all docs if less than k)
+        assertEquals(Math.min(k, expectedTotalDocs), results.size());
+
+        // calculate recall
+        logger.info("Calculating recall");
+        float recall = ((float) results.stream().filter(r -> expectedDocIds.contains(r.getDocId())).count()) / ((float) k);
+        assertTrue("Expected recall to be lower than 0.7 but got " + recall, recall < 0.7);
+
+        // 2. Search with a high-overquery factor
+        logger.info("Searching with high overquery factor");
+        final Map<String, Object> methodParametersWithHighOverQuery = new HashMap<>();
+        methodParametersWithHighOverQuery.put(KNNConstants.METHOD_PARAMETER_OVERQUERY_FACTOR, 100);
+        methodParametersWithHighOverQuery.put(KNNConstants.METHOD_PARAMETER_THRESHOLD, DEFAULT_QUERY_SIMILARITY_THRESHOLD);
+        methodParametersWithHighOverQuery.put(METHOD_PARAMETER_RERANK_FLOOR, DEFAULT_QUERY_RERANK_FLOOR);
+
+        knnQueryBuilder = KNNQueryBuilder.builder()
+                .k(k)
+                .vector(queryVector)
+                .fieldName(FIELD_NAME)
+                .methodParameters(methodParametersWithHighOverQuery)
+                .build();
+        response = CommonTestUtils.searchKNNIndex(restClient, INDEX_NAME, knnQueryBuilder, k);
+        results = CommonTestUtils.parseSearchResponse(EntityUtils.toString(response.getEntity()), FIELD_NAME);
+
+        // Verify we got k results (or all docs if less than k)
+        assertEquals(Math.min(k, expectedTotalDocs), results.size());
+
+        // calculate recall
+        logger.info("Calculating recall");
+        recall = ((float) results.stream().filter(r -> expectedDocIds.contains(r.getDocId())).count()) / ((float) k);
+        assertTrue("Expected recall to be at least 0.9 but got " + recall, recall >= 0.8);
+    }
 }
