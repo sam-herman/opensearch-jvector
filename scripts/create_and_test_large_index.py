@@ -19,6 +19,7 @@ def create_index(host, index_name, dimension, shards=1):
         "settings": {
             "index": {
                 "knn": True,
+                "knn.derived_source.enabled": True,
                 "number_of_shards": shards,
                 "number_of_replicas": 0
             }

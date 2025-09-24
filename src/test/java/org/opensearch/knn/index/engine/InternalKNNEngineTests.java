@@ -25,7 +25,6 @@ import org.opensearch.knn.common.KNNConstants;
 import org.opensearch.knn.index.SpaceType;
 import org.opensearch.knn.index.ThreadLeakFiltersForTests;
 import org.opensearch.knn.index.VectorDataType;
-import org.opensearch.knn.index.codec.jvector.JVectorFormat;
 import org.opensearch.knn.plugin.JVectorKNNPlugin;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.test.OpenSearchIntegTestCase;
@@ -420,8 +419,8 @@ public class InternalKNNEngineTests extends OpenSearchIntegTestCase {
         createKnnIndexMappingWithJVectorEngine(dimension, spaceType, VectorDataType.FLOAT);
 
         // Define batch sizes - mix of small and large batches
-        int smallBatchSize = JVectorFormat.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION / 4;
-        int largeBatchSize = JVectorFormat.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION * 2;
+        int smallBatchSize = DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION / 4;
+        int largeBatchSize = DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION * 2;
 
         final float[][] vectors = new float[smallBatchSize + largeBatchSize + smallBatchSize][dimension];
         for (int i = 0; i < vectors.length; i++) {
@@ -522,7 +521,7 @@ public class InternalKNNEngineTests extends OpenSearchIntegTestCase {
         createKnnIndexMappingWithJVectorEngine(dimension, spaceType, VectorDataType.FLOAT);
 
         // Choosing a batch size that will trigger quantization
-        int batchSize = JVectorFormat.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION * 2;
+        int batchSize = DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION * 2;
 
         final float[][] vectors = TestUtils.generateRandomVectors(batchSize, dimension);
         final int totalDocs = vectors.length;
@@ -596,5 +595,68 @@ public class InternalKNNEngineTests extends OpenSearchIntegTestCase {
         logger.info("Calculating recall");
         recall = ((float) results.stream().filter(r -> expectedDocIds.contains(r.getDocId())).count()) / ((float) k);
         assertTrue("Expected recall to be at least 0.9 but got " + recall, recall >= 0.8);
+    }
+
+    @Test
+    public void testLeadingGraphMergesWithoutQuantization() throws Exception {
+        int dimension = 16;
+        final SpaceType spaceType = SpaceType.L2;
+        createKnnIndexMappingWithJVectorEngine(dimension, spaceType, VectorDataType.FLOAT);
+
+        // Define batch size that will not trigger quantization
+        final int batchSize = DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION / 4;
+
+        final float[][] vectors = TestUtils.generateRandomVectors(batchSize * 3, dimension);
+        final int totalDocs = vectors.length;
+        final int firstBatchOffset = 0;
+        final int secondBatchOffset = firstBatchOffset + batchSize;
+        final int thirdBatchOffset = secondBatchOffset + batchSize;
+
+        // Add the first small batch (below quantization threshold)
+        logger.info("Adding first small batch");
+        final RestClient restClient = getRestClient();
+        CommonTestUtils.bulkAddKnnDocs(restClient, INDEX_NAME, FIELD_NAME, vectors, firstBatchOffset, firstBatchOffset, batchSize, true);
+        CommonTestUtils.flushIndex(restClient, INDEX_NAME);
+
+        logger.info("Adding large batch");
+        // Add the large batch (above quantization threshold)
+        CommonTestUtils.bulkAddKnnDocs(restClient, INDEX_NAME, FIELD_NAME, vectors, secondBatchOffset, secondBatchOffset, batchSize, true);
+        CommonTestUtils.flushIndex(restClient, INDEX_NAME);
+
+        logger.info("Adding second small batch");
+        // Add another small batch
+        CommonTestUtils.bulkAddKnnDocs(restClient, INDEX_NAME, FIELD_NAME, vectors, thirdBatchOffset, thirdBatchOffset, batchSize, true);
+        CommonTestUtils.flushIndex(restClient, INDEX_NAME);
+
+        // Force merge to trigger leading segment merge for all segments
+        logger.info("Force merging");
+        CommonTestUtils.forceMergeKnnIndex(restClient, INDEX_NAME);
+
+        // Verify the total document count
+        int expectedTotalDocs = vectors.length;
+        assertEquals(expectedTotalDocs, CommonTestUtils.getDocCount(restClient, INDEX_NAME));
+
+        // Perform search and verify recall
+        logger.info("Searching");
+        float[] queryVector = TestUtils.generateRandomVectors(1, dimension)[0];
+        int k = 10;
+
+        // First search without forcing merge
+        Response response = CommonTestUtils.searchKNNIndex(restClient, INDEX_NAME, new KNNQueryBuilder(FIELD_NAME, queryVector, k), k);
+        List<KNNResult> results = CommonTestUtils.parseSearchResponse(EntityUtils.toString(response.getEntity()), FIELD_NAME);
+
+        // Verify we got k results (or all docs if less than k)
+        assertEquals(Math.min(k, expectedTotalDocs), results.size());
+
+        // Calculate ground truth with brute force
+        logger.info("Calculating ground truth");
+        List<Set<String>> groundTruth = TestUtils.computeGroundTruthValues(vectors, new float[][] { queryVector }, spaceType, k);
+        assertEquals(1, groundTruth.size());
+        Set<String> expectedDocIds = groundTruth.getFirst();
+
+        // calculate recall
+        logger.info("Calculating recall");
+        float recall = ((float) results.stream().filter(r -> expectedDocIds.contains(r.getDocId())).count()) / ((float) k);
+        assertTrue("Expected recall to be at least 0.9 but got " + recall, recall >= 0.9);
     }
 }

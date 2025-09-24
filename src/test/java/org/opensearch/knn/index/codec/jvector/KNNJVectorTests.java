@@ -28,7 +28,7 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.opensearch.knn.index.codec.jvector.JVectorFormat.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION;
+import static org.opensearch.knn.common.KNNConstants.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION;
 import static org.opensearch.knn.index.engine.CommonTestUtils.getCodec;
 
 /**
@@ -495,6 +495,66 @@ public class KNNJVectorTests extends LuceneTestCase {
                 final float recall = calculateRecall(topDocs, expectedMinScoreInTopK);
                 Assert.assertEquals(1.0f, recall, 0.01f);
 
+                log.info("successfully completed search tests");
+            }
+        }
+    }
+
+    /**
+     * Similar to testJVectorKnnIndex_multiple_merges_large_batches_no_quantization but with random vectors
+     * It's important to add more randomness to the vectors to make sure the graph is not linear
+     * @throws IOException if an I/O error occurs
+     */
+    @Test
+    public void testJVectorKnnIndex_multiple_merges_large_batches_no_quantization_with_random_vectors() throws IOException {
+        int segmentSize = 200;
+        int totalNumberOfDocs = segmentSize * 4;
+        int k = 3; // The number of nearest neighbors to gather
+        final int dimension = 2;
+        final VectorSimilarityFunction vectorSimilarityFunction = VectorSimilarityFunction.EUCLIDEAN;
+        final float[] target = TestUtils.generateRandomVectors(1, dimension)[0];
+        final float[][] source = TestUtils.generateRandomVectors(totalNumberOfDocs, dimension);
+        final Set<Integer> groundTruthVectorsIds = calculateGroundTruthVectorsIds(target, source, k, vectorSimilarityFunction);
+
+        IndexWriterConfig indexWriterConfig = LuceneTestCase.newIndexWriterConfig();
+        indexWriterConfig.setUseCompoundFile(true);
+        indexWriterConfig.setCodec(getCodec(Integer.MAX_VALUE)); // effectively without quantization
+        indexWriterConfig.setMergePolicy(new ForceMergesOnlyMergePolicy(true));
+        indexWriterConfig.setMergeScheduler(new SerialMergeScheduler());
+        // We set the below parameters to make sure no permature flush will occur, this way we can have a single segment, and we can force
+        // test the quantization case
+        indexWriterConfig.setMaxBufferedDocs(10000); // force flush every 10000 docs, this way we make sure that we only have a single
+        // segment for a totalNumberOfDocs < 1000
+        indexWriterConfig.setRAMPerThreadHardLimitMB(1000); // 1000MB per thread, this way we make sure that no premature flush will occur
+
+        final Path indexPath = createTempDir();
+        log.info("Index path: {}", indexPath);
+        try (FSDirectory dir = FSDirectory.open(indexPath); IndexWriter w = new IndexWriter(dir, indexWriterConfig)) {
+            for (int i = 0; i < source.length; i++) {
+                final Document doc = new Document();
+                doc.add(new KnnFloatVectorField(TEST_FIELD, source[i], VectorSimilarityFunction.EUCLIDEAN));
+                doc.add(new IntField(TEST_ID_FIELD, i, Field.Store.YES));
+                w.addDocument(doc);
+                if (i % segmentSize == 0) {
+                    w.commit(); // this creates a new segment without triggering a merge
+                }
+            }
+            log.info("Done writing all files to the file system");
+
+            w.forceMerge(1); // this merges all segments into a single segment
+            log.info("Done merging all segments");
+            try (IndexReader reader = DirectoryReader.open(w)) {
+                log.info("We should now have a single segment with {} documents", totalNumberOfDocs);
+                Assert.assertEquals(1, reader.getContext().leaves().size());
+                Assert.assertEquals(totalNumberOfDocs, reader.numDocs());
+
+                final Query filterQuery = new MatchAllDocsQuery();
+                final IndexSearcher searcher = newSearcher(reader);
+                KnnFloatVectorQuery knnFloatVectorQuery = getJVectorKnnFloatVectorQuery(TEST_FIELD, target, k, filterQuery);
+                TopDocs topDocs = searcher.search(knnFloatVectorQuery, k);
+                assertEquals(k, topDocs.totalHits.value());
+                final float recall = calculateRecall(reader, groundTruthVectorsIds, topDocs, k);
+                Assert.assertEquals(1.0f, recall, 0.05f);
                 log.info("successfully completed search tests");
             }
         }

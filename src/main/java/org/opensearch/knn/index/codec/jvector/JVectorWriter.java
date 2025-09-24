@@ -78,6 +78,7 @@ import static org.opensearch.knn.index.codec.jvector.JVectorFormat.SIMD_POOL;
 @Log4j2
 public class JVectorWriter extends KnnVectorsWriter {
     private static final long SHALLOW_RAM_BYTES_USED = RamUsageEstimator.shallowSizeOfInstance(JVectorWriter.class);
+
     private final List<FieldWriter<?>> fields = new ArrayList<>();
 
     private final IndexOutput meta;
@@ -92,6 +93,7 @@ public class JVectorWriter extends KnnVectorsWriter {
     private final Function<Integer, Integer> numberOfSubspacesPerVectorSupplier; // Number of subspaces used per vector for PQ quantization
                                                                                  // as a function of the original dimension
     private final int minimumBatchSizeForQuantization; // Threshold for the vector count above which we will trigger PQ quantization
+    private final boolean hierarchyEnabled;
 
     private boolean finished = false;
 
@@ -102,7 +104,8 @@ public class JVectorWriter extends KnnVectorsWriter {
         float degreeOverflow,
         float alpha,
         Function<Integer, Integer> numberOfSubspacesPerVectorSupplier,
-        int minimumBatchSizeForQuantization
+        int minimumBatchSizeForQuantization,
+        boolean hierarchyEnabled
     ) throws IOException {
         this.segmentWriteState = segmentWriteState;
         this.maxConn = maxConn;
@@ -111,6 +114,7 @@ public class JVectorWriter extends KnnVectorsWriter {
         this.alpha = alpha;
         this.numberOfSubspacesPerVectorSupplier = numberOfSubspacesPerVectorSupplier;
         this.minimumBatchSizeForQuantization = minimumBatchSizeForQuantization;
+        this.hierarchyEnabled = hierarchyEnabled;
         String metaFileName = IndexFileNames.segmentFileName(
             segmentWriteState.segmentInfo.name,
             segmentWriteState.segmentSuffix,
@@ -171,7 +175,6 @@ public class JVectorWriter extends KnnVectorsWriter {
     @Override
     public void mergeOneField(FieldInfo fieldInfo, MergeState mergeState) throws IOException {
         log.info("Merging field {} into segment {}", fieldInfo.name, segmentWriteState.segmentInfo.name);
-        var success = false;
         try {
             final long mergeStart = Clock.systemDefaultZone().millis();
             switch (fieldInfo.getVectorEncoding()) {
@@ -185,7 +188,6 @@ public class JVectorWriter extends KnnVectorsWriter {
             final long mergeEnd = Clock.systemDefaultZone().millis();
             final long mergeTime = mergeEnd - mergeStart;
             KNNCounter.KNN_GRAPH_MERGE_TIME.add(mergeTime);
-            success = true;
             log.info("Completed Merge field {} into segment {}", fieldInfo.name, segmentWriteState.segmentInfo.name);
         } catch (Exception e) {
             log.error("Error merging field {} into segment {}", fieldInfo.name, segmentWriteState.segmentInfo.name, e);
@@ -824,7 +826,12 @@ public class JVectorWriter extends KnnVectorsWriter {
             }
 
             if (pqVectors == null) {
-                buildScoreProvider = BuildScoreProvider.randomAccessScoreProvider(this, getVectorSimilarityFunction(fieldInfo));
+                buildScoreProvider = BuildScoreProvider.randomAccessScoreProvider(
+                    this,
+                    newToOldOrds,
+                    getVectorSimilarityFunction(fieldInfo)
+                );
+                // graph = getGraph(buildScoreProvider, this, newToOldOrds, fieldInfo, segmentWriteState.segmentInfo.name);
                 if (!deletesFound) {
                     log.info("No deletes found, and no PQ codebooks found, expanding previous graph with additional vectors");
 
@@ -843,6 +850,8 @@ public class JVectorWriter extends KnnVectorsWriter {
             } else {
                 log.info("PQ codebooks found, building graph from scratch with PQ vectors");
                 buildScoreProvider = BuildScoreProvider.pqBuildScoreProvider(getVectorSimilarityFunction(fieldInfo), pqVectors);
+                // Pre-init the diversity provider here to avoid doing it lazily (as it could block the SIMD threads)
+                buildScoreProvider.diversityProviderFor(0);
                 graph = getGraph(buildScoreProvider, this, newToOldOrds, fieldInfo, segmentWriteState.segmentInfo.name);
             }
 
@@ -913,7 +922,7 @@ public class JVectorWriter extends KnnVectorsWriter {
             beamWidth,
             degreeOverflow,
             alpha,
-            true
+            hierarchyEnabled
         );
 
         /*
@@ -952,7 +961,7 @@ public class JVectorWriter extends KnnVectorsWriter {
         final NeighborsScoreCache neighborsScoreCache = leadingReader.getNeighborsScoreCacheForField(fieldName);
         final int numBaseVectors = leadingReader.getFloatVectorValues(fieldName).size();
         final OnDiskGraphIndex onDiskGraphIndex = leadingReader.getOnDiskGraphIndex(fieldName);
-        return GraphIndexBuilder.buildAndMergeNewNodes(
+        return buildAndMergeNewNodes(
             onDiskGraphIndex,
             neighborsScoreCache,
             randomAccessVectorValues,
@@ -962,8 +971,73 @@ public class JVectorWriter extends KnnVectorsWriter {
             beamWidth,
             degreeOverflow,
             alpha,
-            true
+            hierarchyEnabled
         );
+    }
+
+    public static OnHeapGraphIndex buildAndMergeNewNodes(
+        OnDiskGraphIndex onDiskGraphIndex,
+        NeighborsScoreCache perLevelNeighborsScoreCache,
+        RandomAccessVectorValues newVectors,
+        BuildScoreProvider buildScoreProvider,
+        int startingNodeOffset,
+        int[] newToOldOrds,
+        int beamWidth,
+        float overflowRatio,
+        float alpha,
+        boolean addHierarchy
+    ) throws IOException {
+
+        try (
+            GraphIndexBuilder builder = new GraphIndexBuilder(
+                buildScoreProvider,
+                onDiskGraphIndex,
+                perLevelNeighborsScoreCache,
+                beamWidth,
+                overflowRatio,
+                alpha,
+                addHierarchy,
+                true,
+                SIMD_POOL,
+                ForkJoinPool.commonPool()
+            )
+        ) {
+
+            final var vv = newVectors.threadLocalSupplier();
+
+            // parallel graph construction from the merge documents Ids
+            /*
+            SIMD_POOL.submit(() -> IntStream.range(startingNodeOffset, newVectors.size()).parallel().forEach(ord -> {
+                builder.addGraphNode(ord, vv.get().getVector(newToOldOrds[ord]));
+            })).join();
+             */
+
+            // Add each new vector incrementally
+            /*
+            final List<ForkJoinTask<?>> forkJoinTask = new ArrayList<>(newVectors.size());
+            for (int i = startingNodeOffset; i < newVectors.size(); i++) {
+                final int nodeId = i;
+                final VectorFloat<?> vector = newVectors.getVector(newToOldOrds[nodeId]);
+
+                // The GraphIndexBuilder can add nodes to an existing index
+                forkJoinTask.add(PhysicalCoreExecutor.pool().submit(() -> builder.addGraphNode(nodeId, vector)));
+            }
+            for (ForkJoinTask<?> task : forkJoinTask) {
+                task.join();
+            }*/
+
+            final var v = vv.get();
+            for (int i = startingNodeOffset; i < newVectors.size(); i++) {
+                final int nodeId = i;
+                final VectorFloat<?> vector = v.getVector(newToOldOrds[nodeId]);
+
+                // The GraphIndexBuilder can add nodes to an existing index
+                builder.addGraphNode(nodeId, vector);
+            }
+
+            builder.cleanup();
+            return builder.getGraph();
+        }
     }
 
     static class RandomAccessVectorValuesOverVectorValues implements RandomAccessVectorValues {

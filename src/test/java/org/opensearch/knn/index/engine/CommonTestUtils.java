@@ -47,7 +47,7 @@ import static org.opensearch.knn.KNNRestTestCase.FIELD_NAME;
 import static org.opensearch.knn.common.KNNConstants.DISK_ANN;
 import static org.opensearch.knn.common.KNNConstants.VECTOR_DATA_TYPE_FIELD;
 import static org.opensearch.knn.index.KNNSettings.KNN_INDEX;
-import static org.opensearch.knn.index.codec.jvector.JVectorFormat.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION;
+import static org.opensearch.knn.common.KNNConstants.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION;
 
 public class CommonTestUtils {
     private static final NamedXContentRegistry DEFAULT_NAMED_X_CONTENT_REGISTRY = new NamedXContentRegistry(

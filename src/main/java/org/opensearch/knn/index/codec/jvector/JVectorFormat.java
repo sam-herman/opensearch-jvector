@@ -28,13 +28,11 @@ public class JVectorFormat extends KnnVectorsFormat {
     public static final String META_EXTENSION = "meta-" + JVECTOR_FILES_SUFFIX;
     public static final String VECTOR_INDEX_EXTENSION = "data-" + JVECTOR_FILES_SUFFIX;
     public static final String NEIGHBORS_SCORE_CACHE_EXTENSION = "neighbors-score-cache-" + JVECTOR_FILES_SUFFIX;
-    public static final int DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION = 1024; // The minimum number of vectors required to trigger
-                                                                                // quantization
+
     public static final int VERSION_START = 0;
     public static final int VERSION_CURRENT = VERSION_START;
     public static final int DEFAULT_MAX_CONN = 32;
     public static final int DEFAULT_BEAM_WIDTH = 100;
-    public static final boolean DEFAULT_MERGE_ON_DISK = true;
     // Unfortunately, this can't be managed yet by the OpenSearch ThreadPool because it's not supporting {@link ForkJoinPool} types
     public static final ForkJoinPool SIMD_POOL = getPhysicalCoreExecutor();
 
@@ -44,6 +42,7 @@ public class JVectorFormat extends KnnVectorsFormat {
     private final int minBatchSizeForQuantization;
     private final float alpha;
     private final float neighborOverflow;
+    private final boolean hierarchyEnabled;
 
     public JVectorFormat() {
         this(
@@ -53,7 +52,8 @@ public class JVectorFormat extends KnnVectorsFormat {
             KNNConstants.DEFAULT_NEIGHBOR_OVERFLOW_VALUE.floatValue(),
             KNNConstants.DEFAULT_ALPHA_VALUE.floatValue(),
             JVectorFormat::getDefaultNumberOfSubspacesPerVector,
-            DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION
+            KNNConstants.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION,
+            KNNConstants.DEFAULT_HIERARCHY_ENABLED
         );
     }
 
@@ -65,7 +65,8 @@ public class JVectorFormat extends KnnVectorsFormat {
             KNNConstants.DEFAULT_NEIGHBOR_OVERFLOW_VALUE.floatValue(),
             KNNConstants.DEFAULT_ALPHA_VALUE.floatValue(),
             JVectorFormat::getDefaultNumberOfSubspacesPerVector,
-            minBatchSizeForQuantization
+            minBatchSizeForQuantization,
+            KNNConstants.DEFAULT_HIERARCHY_ENABLED
         );
     }
 
@@ -75,9 +76,19 @@ public class JVectorFormat extends KnnVectorsFormat {
         float neighborOverflow,
         float alpha,
         Function<Integer, Integer> numberOfSubspacesPerVectorSupplier,
-        int minBatchSizeForQuantization
+        int minBatchSizeForQuantization,
+        boolean hierarchyEnabled
     ) {
-        this(NAME, maxConn, beamWidth, neighborOverflow, alpha, numberOfSubspacesPerVectorSupplier, minBatchSizeForQuantization);
+        this(
+            NAME,
+            maxConn,
+            beamWidth,
+            neighborOverflow,
+            alpha,
+            numberOfSubspacesPerVectorSupplier,
+            minBatchSizeForQuantization,
+            hierarchyEnabled
+        );
     }
 
     public JVectorFormat(
@@ -87,7 +98,8 @@ public class JVectorFormat extends KnnVectorsFormat {
         float neighborOverflow,
         float alpha,
         Function<Integer, Integer> numberOfSubspacesPerVectorSupplier,
-        int minBatchSizeForQuantization
+        int minBatchSizeForQuantization,
+        boolean hierarchyEnabled
     ) {
         super(name);
         this.maxConn = maxConn;
@@ -96,6 +108,7 @@ public class JVectorFormat extends KnnVectorsFormat {
         this.minBatchSizeForQuantization = minBatchSizeForQuantization;
         this.alpha = alpha;
         this.neighborOverflow = neighborOverflow;
+        this.hierarchyEnabled = hierarchyEnabled;
     }
 
     @Override
@@ -107,7 +120,8 @@ public class JVectorFormat extends KnnVectorsFormat {
             neighborOverflow,
             alpha,
             numberOfSubspacesPerVectorSupplier,
-            minBatchSizeForQuantization
+            minBatchSizeForQuantization,
+            hierarchyEnabled
         );
     }
 
