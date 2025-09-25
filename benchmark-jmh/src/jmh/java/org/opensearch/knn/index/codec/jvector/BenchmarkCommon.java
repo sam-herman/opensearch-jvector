@@ -16,8 +16,6 @@ import org.opensearch.knn.index.codec.KNNCodecVersion;
 
 import java.util.PriorityQueue;
 
-import static org.opensearch.knn.common.KNNConstants.DEFAULT_MINIMUM_BATCH_SIZE_FOR_QUANTIZATION;
-
 public class BenchmarkCommon {
     public static final String JVECTOR_NOT_QUANTIZED = "jvector_not_quantized";
     public static final String JVECTOR_QUANTIZED = "jvector_quantized";

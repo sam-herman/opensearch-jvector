@@ -987,7 +987,6 @@ public class JVectorWriter extends KnnVectorsWriter {
         float alpha,
         boolean addHierarchy
     ) throws IOException {
-
         try (
             GraphIndexBuilder builder = new GraphIndexBuilder(
                 buildScoreProvider,
@@ -1002,38 +1001,12 @@ public class JVectorWriter extends KnnVectorsWriter {
                 ForkJoinPool.commonPool()
             )
         ) {
-
             final var vv = newVectors.threadLocalSupplier();
 
             // parallel graph construction from the merge documents Ids
-            /*
             SIMD_POOL.submit(() -> IntStream.range(startingNodeOffset, newVectors.size()).parallel().forEach(ord -> {
                 builder.addGraphNode(ord, vv.get().getVector(newToOldOrds[ord]));
             })).join();
-             */
-
-            // Add each new vector incrementally
-            /*
-            final List<ForkJoinTask<?>> forkJoinTask = new ArrayList<>(newVectors.size());
-            for (int i = startingNodeOffset; i < newVectors.size(); i++) {
-                final int nodeId = i;
-                final VectorFloat<?> vector = newVectors.getVector(newToOldOrds[nodeId]);
-
-                // The GraphIndexBuilder can add nodes to an existing index
-                forkJoinTask.add(PhysicalCoreExecutor.pool().submit(() -> builder.addGraphNode(nodeId, vector)));
-            }
-            for (ForkJoinTask<?> task : forkJoinTask) {
-                task.join();
-            }*/
-
-            final var v = vv.get();
-            for (int i = startingNodeOffset; i < newVectors.size(); i++) {
-                final int nodeId = i;
-                final VectorFloat<?> vector = v.getVector(newToOldOrds[nodeId]);
-
-                // The GraphIndexBuilder can add nodes to an existing index
-                builder.addGraphNode(nodeId, vector);
-            }
 
             builder.cleanup();
             return builder.getGraph();
