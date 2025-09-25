@@ -23,12 +23,12 @@ public class JVectorFloatVectorValues extends FloatVectorValues {
     private final VectorSimilarityFunction similarityFunction;
     private final int dimension;
     private final int size;
-    private final JVectorWriter.JVectorLuceneDocMap jVectorLuceneDocMap;
+    private final JVectorLuceneDocMap jVectorLuceneDocMap;
 
     public JVectorFloatVectorValues(
         OnDiskGraphIndex onDiskGraphIndex,
         VectorSimilarityFunction similarityFunction,
-        JVectorWriter.JVectorLuceneDocMap jVectorLuceneDocMap
+        JVectorLuceneDocMap jVectorLuceneDocMap
     ) throws IOException {
         this.dimension = onDiskGraphIndex.getDimension();
         this.size = onDiskGraphIndex.size();

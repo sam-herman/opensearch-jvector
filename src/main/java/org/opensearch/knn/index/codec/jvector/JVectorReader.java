@@ -158,7 +158,7 @@ public class JVectorReader extends KnnVectorsReader {
             } else { // Not quantized, used typical searcher
                 ssp = DefaultSearchScoreProvider.exact(q, fieldEntryMap.get(field).similarityFunction, view);
             }
-            final JVectorWriter.JVectorLuceneDocMap jvectorLuceneDocMap = fieldEntryMap.get(field).jVectorLuceneDocMap;
+            final JVectorLuceneDocMap jvectorLuceneDocMap = fieldEntryMap.get(field).jVectorLuceneDocMap;
             // Convert the acceptDocs bitmap from Lucene to jVector ordinal bitmap filter
             // Logic works as follows: if acceptDocs is null, we accept all ordinals. Otherwise, we check if the jVector ordinal has a
             // corresponding Lucene doc ID accepted by acceptDocs filter.
@@ -239,7 +239,7 @@ public class JVectorReader extends KnnVectorsReader {
         private final long pqCodebooksAndVectorsOffset;
         private final String vectorIndexFieldDataFileName;
         private final String neighborsScoreCacheIndexFieldFileName;
-        private final JVectorWriter.JVectorLuceneDocMap jVectorLuceneDocMap;
+        private final JVectorLuceneDocMap jVectorLuceneDocMap;
         private final ReaderSupplier indexReaderSupplier;
         private final ReaderSupplier pqCodebooksReaderSupplier;
         private final ReaderSupplier neighborsScoreCacheIndexReaderSupplier;
