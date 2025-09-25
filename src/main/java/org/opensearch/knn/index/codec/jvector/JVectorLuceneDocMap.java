@@ -1,3 +1,8 @@
+/*
+ * Copyright OpenSearch Contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 package org.opensearch.knn.index.codec.jvector;
 
 import lombok.extern.log4j.Log4j2;
@@ -67,9 +72,9 @@ public class JVectorLuceneDocMap {
         }
         if (maxDocId > ordinalsToDocIds.length) {
             log.warn(
-                    "Max doc id {} is greater than the number of ordinals {}, this implies a lot of deleted documents. Or that some documents are missing vectors. Wasting a lot of memory",
-                    maxDocId,
-                    ordinalsToDocIds.length
+                "Max doc id {} is greater than the number of ordinals {}, this implies a lot of deleted documents. Or that some documents are missing vectors. Wasting a lot of memory",
+                maxDocId,
+                ordinalsToDocIds.length
             );
         }
         this.docIdsToOrdinals = new int[maxDocs];
