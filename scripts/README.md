@@ -138,3 +138,15 @@ python create_and_test_large_index.py --batch-size 1000 --force-merge-frequency 
 # Generate plots from existing CSV
 python create_and_test_large_index.py --csv-output merge_times.csv --plot
 ```
+
+#### Important Note For Large Indices
+
+When working with large indices, it's important to consider the point at which we will require quantization.
+Quantization is becoming critical during index construction when we can't fit the full precision vectors in memory and are forced to use disk.
+Therefore, we want to set the `minimum_batch_size_for_quantization` to a value high enough so we can avoid quantization during index construction.
+Or alternatively, we can set it to a lower value and accept the additional compute cost of quantization during index construction, and thus avoid the disk access.
+
+```shell
+# Run with quantization disabled during index construction until we reach 10M documents
+python create_and_test_large_index.py --batch-size 1000 --force-merge-frequency 1000 --num-vectors 100000 --min-batch-size-for-quantization 10000000
+```

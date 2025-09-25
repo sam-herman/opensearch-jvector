@@ -95,8 +95,14 @@ public class JVectorEngineIT extends KNNRestTestCase {
             .field(KNNConstants.METHOD_PARAMETER_SPACE_TYPE, SpaceType.L2.getValue())
             .field(KNNConstants.KNN_ENGINE, KNNEngine.JVECTOR.getName())
             .startObject(KNNConstants.PARAMETERS)
+            // Adding all the parameters here (even though we could have just let it use whatever defaults) just to make sure everything is
+            // correctly wired
             .field(KNNConstants.METHOD_PARAMETER_M, mValues.get(random().nextInt(mValues.size())))
             .field(KNNConstants.METHOD_PARAMETER_EF_CONSTRUCTION, efConstructionValues.get(random().nextInt(efConstructionValues.size())))
+            .field(KNNConstants.METHOD_PARAMETER_ALPHA, 1.2)
+            .field(KNNConstants.METHOD_PARAMETER_NEIGHBOR_OVERFLOW, 2.0)
+            .field(KNNConstants.METHOD_PARAMETER_HIERARCHY_ENABLED, false)
+            .field(KNNConstants.METHOD_PARAMETER_MIN_BATCH_SIZE_FOR_QUANTIZATION, 1000)
             .endObject()
             .endObject()
             .endObject()
