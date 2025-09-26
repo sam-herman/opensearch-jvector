@@ -47,6 +47,7 @@ public class JVectorFloatVectorValues extends FloatVectorValues {
         return size;
     }
 
+    // This allows us to access the vector without copying it to float[]
     public VectorFloat<?> vectorFloatValue(int ord) {
         return view.getVector(ord);
     }
@@ -101,6 +102,10 @@ public class JVectorFloatVectorValues extends FloatVectorValues {
         } catch (Throwable e) {
             throw new RuntimeException(e);
         }
+    }
+
+    public VectorFloat<?> vectorValueObject(int i) throws IOException {
+        return vectorFloatValue(i);
     }
 
     @Override

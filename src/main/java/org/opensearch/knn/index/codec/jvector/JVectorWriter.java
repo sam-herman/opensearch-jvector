@@ -579,7 +579,7 @@ public class JVectorWriter extends KnnVectorsWriter {
 
         // Array of sub-readers
         private final KnnVectorsReader[] readers;
-        private final FloatVectorValues[] perReaderFloatVectorValues;
+        private final JVectorFloatVectorValues[] perReaderFloatVectorValues;
 
         // For each ordinal, stores which reader and which ordinal in that reader
         private final int[][] ordMapping;
@@ -681,7 +681,7 @@ public class JVectorWriter extends KnnVectorsWriter {
                 baseOrds[tempLeadingReaderIdx] = tempBaseOrd;
             }
 
-            this.perReaderFloatVectorValues = new FloatVectorValues[readers.length];
+            this.perReaderFloatVectorValues = new JVectorFloatVectorValues[readers.length];
             this.dimension = dimension;
 
             // Build mapping from global ordinal to [readerIndex, readerOrd]
@@ -701,7 +701,7 @@ public class JVectorWriter extends KnnVectorsWriter {
             // For each reader
             int newGlobalOrd = 0;
             for (int readerIdx = 0; readerIdx < readers.length; readerIdx++) {
-                final FloatVectorValues values = readers[readerIdx].getFloatVectorValues(fieldName);
+                final JVectorFloatVectorValues values = (JVectorFloatVectorValues) readers[readerIdx].getFloatVectorValues(fieldName);
                 perReaderFloatVectorValues[readerIdx] = values;
                 // For each vector in this reader
                 KnnVectorValues.DocIndexIterator it = values.iterator();
@@ -874,22 +874,12 @@ public class JVectorWriter extends KnnVectorsWriter {
                 throw new IllegalArgumentException("Ordinal out of bounds: " + ord);
             }
 
-            try {
+            final int readerIdx = ordMapping[ord][READER_ID];
+            final int readerOrd = ordMapping[ord][READER_ORD];
 
-                final int readerIdx = ordMapping[ord][READER_ID];
-                final int readerOrd = ordMapping[ord][READER_ORD];
-
-                // Access to float values is not thread safe
-                synchronized (this) {
-                    final FloatVectorValues values = perReaderFloatVectorValues[readerIdx];
-                    final float[] vector = values.vectorValue(readerOrd);
-                    final float[] copy = new float[vector.length];
-                    System.arraycopy(vector, 0, copy, 0, vector.length);
-                    return VECTOR_TYPE_SUPPORT.createFloatVector(copy);
-                }
-            } catch (IOException e) {
-                log.error("Error retrieving vector at ordinal {}", ord, e);
-                throw new RuntimeException(e);
+            // Access to float values is not thread safe
+            synchronized (perReaderFloatVectorValues[readerIdx]) {
+                return perReaderFloatVectorValues[readerIdx].vectorFloatValue(readerOrd);
             }
         }
 
