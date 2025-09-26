@@ -34,7 +34,8 @@ public class JVectorFormat extends KnnVectorsFormat {
     public static final int DEFAULT_MAX_CONN = 32;
     public static final int DEFAULT_BEAM_WIDTH = 100;
     // Unfortunately, this can't be managed yet by the OpenSearch ThreadPool because it's not supporting {@link ForkJoinPool} types
-    public static final ForkJoinPool SIMD_POOL = getPhysicalCoreExecutor();
+    public static final ForkJoinPool SIMD_POOL_MERGE = getPhysicalCoreExecutor();
+    public static final ForkJoinPool SIMD_POOL_FLUSH = getPhysicalCoreExecutor();
 
     private final int maxConn;
     private final int beamWidth;

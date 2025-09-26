@@ -47,7 +47,8 @@ import java.util.stream.IntStream;
 
 import static io.github.jbellis.jvector.quantization.KMeansPlusPlusClusterer.UNWEIGHTED;
 import static org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsReader.readVectorEncoding;
-import static org.opensearch.knn.index.codec.jvector.JVectorFormat.SIMD_POOL;
+import static org.opensearch.knn.index.codec.jvector.JVectorFormat.SIMD_POOL_FLUSH;
+import static org.opensearch.knn.index.codec.jvector.JVectorFormat.SIMD_POOL_MERGE;
 
 /**
  * JVectorWriter is responsible for writing vector data into index segments using the JVector library.
@@ -242,7 +243,8 @@ public class JVectorWriter extends KnnVectorsWriter {
                 randomAccessVectorValues,
                 newToOldOrds,
                 fieldInfo,
-                segmentWriteState.segmentInfo.name
+                segmentWriteState.segmentInfo.name,
+                SIMD_POOL_FLUSH
             );
             writeField(field.fieldInfo, field.randomAccessVectorValues, pqVectors, newToOldOrds, jVectorLuceneDocMap, graph);
 
@@ -394,7 +396,7 @@ public class JVectorWriter extends KnnVectorsWriter {
             numberOfClustersPerSubspace, // number of centroids per subspace
             vectorSimilarityFunction == VectorSimilarityFunction.EUCLIDEAN, // center the dataset
             UNWEIGHTED,
-            SIMD_POOL,
+            SIMD_POOL_MERGE,
             ForkJoinPool.commonPool()
         );
 
@@ -404,7 +406,7 @@ public class JVectorWriter extends KnnVectorsWriter {
         KNNCounter.KNN_QUANTIZATION_TRAINING_TIME.add(trainingTime);
         log.info("Encoding and building PQ vectors for field {} for {} vectors", fieldName, randomAccessVectorValues.size());
         // PQVectors pqVectors = pq.encodeAll(randomAccessVectorValues, SIMD_POOL);
-        PQVectors pqVectors = PQVectors.encodeAndBuild(pq, newToOldOrds.length, newToOldOrds, randomAccessVectorValues, SIMD_POOL);
+        PQVectors pqVectors = PQVectors.encodeAndBuild(pq, newToOldOrds.length, newToOldOrds, randomAccessVectorValues, SIMD_POOL_MERGE);
         log.info(
             "Encoded and built PQ vectors for field {}, original size: {} bytes, compressed size: {} bytes",
             fieldName,
@@ -822,7 +824,7 @@ public class JVectorWriter extends KnnVectorsWriter {
                 final long trainingTime = end - start;
                 log.info("Refined PQ codebooks for field {}, in {} millis", fieldName, trainingTime);
                 KNNCounter.KNN_QUANTIZATION_TRAINING_TIME.add(trainingTime);
-                pqVectors = PQVectors.encodeAndBuild(leadingCompressor, newToOldOrds.length, newToOldOrds, this, SIMD_POOL);
+                pqVectors = PQVectors.encodeAndBuild(leadingCompressor, newToOldOrds.length, newToOldOrds, this, SIMD_POOL_MERGE);
             }
 
             if (pqVectors == null) {
@@ -845,14 +847,21 @@ public class JVectorWriter extends KnnVectorsWriter {
                     );
                 } else {
                     log.info("Deletes found, and no PQ codebooks found, building new graph from scratch");
-                    graph = getGraph(buildScoreProvider, this, newToOldOrds, fieldInfo, segmentWriteState.segmentInfo.name);
+                    graph = getGraph(
+                        buildScoreProvider,
+                        this,
+                        newToOldOrds,
+                        fieldInfo,
+                        segmentWriteState.segmentInfo.name,
+                        SIMD_POOL_MERGE
+                    );
                 }
             } else {
                 log.info("PQ codebooks found, building graph from scratch with PQ vectors");
                 buildScoreProvider = BuildScoreProvider.pqBuildScoreProvider(getVectorSimilarityFunction(fieldInfo), pqVectors);
                 // Pre-init the diversity provider here to avoid doing it lazily (as it could block the SIMD threads)
                 buildScoreProvider.diversityProviderFor(0);
-                graph = getGraph(buildScoreProvider, this, newToOldOrds, fieldInfo, segmentWriteState.segmentInfo.name);
+                graph = getGraph(buildScoreProvider, this, newToOldOrds, fieldInfo, segmentWriteState.segmentInfo.name, SIMD_POOL_MERGE);
             }
 
             writeField(fieldInfo, this, pqVectors, newToOldOrds, jVectorLuceneDocMap, graph);
@@ -903,7 +912,8 @@ public class JVectorWriter extends KnnVectorsWriter {
         RandomAccessVectorValues randomAccessVectorValues,
         int[] newToOldOrds,
         FieldInfo fieldInfo,
-        String segmentName
+        String segmentName,
+        ForkJoinPool SIMD_POOL
     ) {
         final GraphIndexBuilder graphIndexBuilder = new GraphIndexBuilder(
             buildScoreProvider,
@@ -987,14 +997,14 @@ public class JVectorWriter extends KnnVectorsWriter {
                 alpha,
                 addHierarchy,
                 true,
-                SIMD_POOL,
+                SIMD_POOL_MERGE,
                 ForkJoinPool.commonPool()
             )
         ) {
             final var vv = newVectors.threadLocalSupplier();
 
             // parallel graph construction from the merge documents Ids
-            SIMD_POOL.submit(() -> IntStream.range(startingNodeOffset, newVectors.size()).parallel().forEach(ord -> {
+            SIMD_POOL_MERGE.submit(() -> IntStream.range(startingNodeOffset, newVectors.size()).parallel().forEach(ord -> {
                 builder.addGraphNode(ord, vv.get().getVector(newToOldOrds[ord]));
             })).join();
 
